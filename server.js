@@ -1,76 +1,77 @@
-const express = require('express');
-const multer = require('multer');
-const fs = require('fs');
-const path = require('path');
-const { pipeline } = require('@xenova/transformers');
-const { createCanvas, loadImage } = require('canvas');
+import os
+from flask import Flask, render_template, request, redirect, url_for
+from werkzeug.utils import secure_filename
+from PIL import Image
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+# Import LLaVA real
+from llava.model import load_model_and_preprocess
 
-// Pasta uploads
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+UPLOAD_FOLDER = 'uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp'}
 
-// Multer config
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname))
-});
-const upload = multer({ storage });
+app = Flask(__name__)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-app.use(express.static('public'));
-app.use(express.json());
+# Cria pasta uploads se não existir
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
-// Inicializa BLIP-2 pipeline
-let blipPipeline;
-(async () => {
-  console.log("Carregando BLIP-2...");
-  blipPipeline = await pipeline('image-to-text', 'Salesforce/blip2-flan-t5-xl');
-  console.log("BLIP-2 carregado!");
-})();
+# Carrega modelo LLaVA (Tiny ou outro)
+model_name = "llava_tiny"
+llava_model, preprocess = load_model_and_preprocess(model_name, device="cpu")  # troque para "cuda" se GPU disponível
 
-// Pergunta sobre imagem existente
-app.post('/ask-image', async (req, res) => {
-  const { filename, question } = req.body;
-  if (!filename || !question) return res.status(400).json({ error: 'Faltando arquivo ou pergunta' });
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-  const imagePath = path.join(uploadDir, filename);
-  if (!fs.existsSync(imagePath)) return res.status(404).json({ error: 'Imagem não encontrada' });
+# Dicionário para armazenar imagens temporariamente
+images_dict = {}
 
-  try {
-    const img = await loadImage(imagePath);
-    const canvas = createCanvas(img.width, img.height);
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
+@app.route("/", methods=['GET', 'POST'])
+def index():
+    answer = None
+    image_url = None
+    image_name = None
 
-    const output = await blipPipeline(canvas, question);
-    res.json({ answer: output.text || 'Nenhuma resposta' });
+    # Upload de imagem
+    if request.method == 'POST' and 'image' in request.files:
+        file = request.files['image']
+        if file.filename != '' and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+            images_dict[filename] = filepath
+            image_url = url_for('uploaded_file', filename=filename)
+            image_name = filename
 
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erro ao processar imagem' });
-  }
-});
+    # Pergunta sobre imagem existente
+    if request.method == 'POST' and 'question' in request.form and 'image_name' in request.form:
+        question = request.form['question']
+        image_name = request.form['image_name']
+        if image_name in images_dict:
+            image_path = images_dict[image_name]
+            img = preprocess(Image.open(image_path)).unsqueeze(0)
 
-// Upload de nova imagem
-app.post('/upload-image', upload.single('image'), (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'Nenhuma imagem enviada' });
-  res.json({ filename: req.file.filename });
-});
+            # Gera resposta real usando LLaVA
+            answer = llava_model.generate({"image": img, "text_input": question}, max_new_tokens=200)[0]
 
-// Excluir imagem
-app.post('/delete-image', (req, res) => {
-  const { filename } = req.body;
-  if (!filename) return res.status(400).json({ error: 'Faltando nome do arquivo' });
+            image_url = url_for('uploaded_file', filename=image_name)
 
-  const imagePath = path.join(uploadDir, filename);
-  if (fs.existsSync(imagePath)) {
-    fs.unlinkSync(imagePath);
-    return res.json({ success: true });
-  } else {
-    return res.status(404).json({ error: 'Imagem não encontrada' });
-  }
-});
+    return render_template('index.html', answer=answer, image_url=image_url, image_name=image_name)
 
-app.listen(PORT, () => console.log(`Servidor rodando em http://localhost:${PORT}`));
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return redirect(url_for('static', filename='uploads/' + filename))
+
+# Excluir imagem manualmente
+@app.route('/delete/<filename>', methods=['POST'])
+def delete_file(filename):
+    if filename in images_dict:
+        try:
+            os.remove(images_dict[filename])
+            del images_dict[filename]
+        except Exception as e:
+            print(f"Erro ao excluir arquivo: {e}")
+    return redirect(url_for('index'))
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True)
