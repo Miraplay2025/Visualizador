@@ -1,0 +1,8 @@
+flask
+torch
+torchvision
+timm
+detectron2 @ https://dl.fbaipublicfiles.com/detectron2/wheels/cu118/torch2.1/index.html
+Pillow
+tesserocr
+opencv-python
