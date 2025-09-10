@@ -3,4 +3,3 @@ Pillow==10.0.0
 torch>=2.1.0
 transformers>=4.34.0
 sentencepiece
-git+https://github.com/haotian-liu/LLaVA.git@main
