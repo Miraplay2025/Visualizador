@@ -1,64 +1,86 @@
 <!DOCTYPE html>
-<html lang="pt">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Comparar Imagens</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat com GPT-2</title>
     <style>
-        body { font-family: Arial; text-align: center; padding: 20px; }
-        img { max-width: 200px; margin: 10px; }
-        #resultado { margin-top: 20px; font-weight: bold; }
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f7f7f7;
+            padding: 20px;
+        }
+        #chat-container {
+            width: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        #messages {
+            height: 300px;
+            overflow-y: scroll;
+            margin-bottom: 20px;
+            padding: 10px;
+            background-color: #fafafa;
+            border-radius: 8px;
+        }
+        .user-message {
+            color: blue;
+        }
+        .bot-message {
+            color: green;
+        }
+        input[type="text"] {
+            width: 80%;
+            padding: 10px;
+            margin-right: 10px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
-    <h1>Comparar Imagens (Objetos e Texto)</h1>
-
-    <input type="file" id="imagem1" accept="image/*">
-    <img id="preview1" src="" alt="Pré-visualização 1"><br>
-
-    <input type="file" id="imagem2" accept="image/*">
-    <img id="preview2" src="" alt="Pré-visualização 2"><br>
-
-    <button onclick="comparar()">Verificar Similaridade</button>
-
-    <div id="resultado"></div>
+    <div id="chat-container">
+        <div id="messages"></div>
+        <div>
+            <input type="text" id="user-input" placeholder="Digite sua mensagem...">
+            <button onclick="sendMessage()">Enviar</button>
+        </div>
+    </div>
 
     <script>
-        const preview1 = document.getElementById('preview1');
-        const preview2 = document.getElementById('preview2');
+        async function sendMessage() {
+            const userInput = document.getElementById("user-input").value;
+            if (!userInput) return;
+            
+            // Exibe a mensagem do usuário
+            const messagesDiv = document.getElementById("messages");
+            messagesDiv.innerHTML += `<div class="user-message"><strong>Você:</strong> ${userInput}</div>`;
+            document.getElementById("user-input").value = "";
+            
+            // Envia a mensagem para o servidor
+            const response = await fetch("/chat", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: "message=" + encodeURIComponent(userInput)
+            });
 
-        document.getElementById('imagem1').onchange = e => {
-            const file = e.target.files[0];
-            preview1.src = URL.createObjectURL(file);
-        };
-        document.getElementById('imagem2').onchange = e => {
-            const file = e.target.files[0];
-            preview2.src = URL.createObjectURL(file);
-        };
-
-        async function comparar() {
-            const resultadoDiv = document.getElementById('resultado');
-            resultadoDiv.innerText = "Comparando imagens...";
-
-            const formData = new FormData();
-            formData.append('imagem1', document.getElementById('imagem1').files[0]);
-            formData.append('imagem2', document.getElementById('imagem2').files[0]);
-
-            try {
-                const response = await fetch('/comparar', {
-                    method: 'POST',
-                    body: formData
-                });
-                const data = await response.json();
-                if(data.status === 'iguais'){
-                    resultadoDiv.innerHTML = `<b>Imagens possuem elementos iguais!</b><br>
-                        Objetos: ${data.objetos_comuns.join(', ')}<br>
-                        Textos: ${data.textos_comuns.join(', ')}`;
-                } else {
-                    resultadoDiv.innerText = 'Imagens são diferentes.';
-                }
-            } catch (err) {
-                resultadoDiv.innerText = 'Erro ao comparar imagens.';
-            }
+            // Recebe a resposta e exibe
+            const data = await response.json();
+            messagesDiv.innerHTML += `<div class="bot-message"><strong>GPT-2:</strong> ${data.response}</div>`;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }
     </script>
 </body>
