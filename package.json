@@ -1,7 +1,7 @@
 {
-  "name": "vqa-app",
+  "name": "clip-vqa-app",
   "version": "1.0.0",
-  "description": "Sistema VQA com InstructBLIP",
+  "description": "VQA leve com CLIP + LLM",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
