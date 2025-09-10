@@ -3,47 +3,86 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>LLaVA Flask Real</title>
+<title>VQA com InstructBLIP</title>
 <style>
-body { font-family: Arial; display:flex; flex-direction:column; align-items:center; padding:40px; background:#f9f9f9; }
-h1 { margin-bottom:20px; }
-input, button { padding:10px; margin-top:10px; border-radius:6px; border:1px solid #ccc; }
-button { background:#2196F3; color:white; border:none; cursor:pointer; }
-button:hover { background:#1976D2; }
-#preview { max-width:80%; margin-top:20px; border-radius:8px; display:block; }
-#answer { margin-top:20px; padding:15px; background:#f1f1f1; border-radius:6px; max-width:80%; white-space: pre-wrap; }
-form { display:flex; flex-direction:column; align-items:center; }
+body { font-family: Arial; display: flex; flex-direction: column; align-items: center; padding: 50px; background: #f9f9f9; }
+h1 { margin-bottom: 20px; }
+.upload-btn { background:#4CAF50;color:#fff;padding:15px 25px;border:none;border-radius:8px;cursor:pointer; }
+input[type=file]{display:none;}
+#preview { max-width:80%; margin-top:20px; border-radius:8px; display:none; }
+#questionDiv { display:none; margin-top:20px; }
+#answer { margin-top:20px; background:#f1f1f1; padding:15px; border-radius:6px; max-width:80%; display:none; }
+button { margin-top:10px; padding:10px 20px; cursor:pointer; border:none; border-radius:6px; }
 </style>
 </head>
 <body>
 
-<h1>LLaVA: Pergunte sobre sua imagem</h1>
+<h1>VQA - Pergunte sobre a imagem</h1>
+<label class="upload-btn" for="imageInput">Escolher Imagem</label>
+<input type="file" id="imageInput" accept="image/*">
+<img id="preview">
+<div id="questionDiv">
+  <input type="text" id="question" placeholder="Digite sua pergunta" style="padding:10px;width:300px;">
+  <button id="askBtn">Perguntar</button>
+  <button id="deleteBtn" style="background:red;color:#fff;">Excluir Imagem</button>
+</div>
+<div id="answer"></div>
 
-<!-- Formulário de upload -->
-<form method="POST" enctype="multipart/form-data">
-    <input type="file" name="image" required>
-    <button type="submit">Enviar Imagem</button>
-</form>
+<script>
+let filename = '';
 
-{% if image_url %}
-<img id="preview" src="{{ image_url }}" alt="Pré-visualização">
+const imageInput = document.getElementById('imageInput');
+const preview = document.getElementById('preview');
+const questionDiv = document.getElementById('questionDiv');
+const askBtn = document.getElementById('askBtn');
+const deleteBtn = document.getElementById('deleteBtn');
+const answerDiv = document.getElementById('answer');
 
-<!-- Botão para deletar a imagem -->
-<form method="POST" action="{{ url_for('delete_file', filename=image_name) }}">
-    <button type="submit">Excluir Imagem</button>
-</form>
+imageInput.addEventListener('change', async () => {
+  const file = imageInput.files[0];
+  if (!file) return;
 
-<!-- Formulário para perguntas -->
-<form method="POST">
-    <input type="hidden" name="image_name" value="{{ image_name }}">
-    <input type="text" name="question" placeholder="Digite sua pergunta" required>
-    <button type="submit">Perguntar</button>
-</form>
-{% endif %}
+  const formData = new FormData();
+  formData.append('image', file);
 
-{% if answer %}
-<div id="answer">{{ answer }}</div>
-{% endif %}
+  const res = await fetch('/upload', { method: 'POST', body: formData });
+  const data = await res.json();
+  filename = data.filename;
+
+  preview.src = URL.createObjectURL(file);
+  preview.style.display = 'block';
+  questionDiv.style.display = 'block';
+  answerDiv.style.display = 'none';
+});
+
+askBtn.addEventListener('click', async () => {
+  const question = document.getElementById('question').value;
+  if (!question || !filename) return;
+  answerDiv.textContent = 'Aguardando resposta...';
+  answerDiv.style.display = 'block';
+
+  const res = await fetch('/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, question })
+  });
+  const data = await res.json();
+  answerDiv.textContent = data.answer;
+});
+
+deleteBtn.addEventListener('click', async () => {
+  if (!filename) return;
+  await fetch('/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename })
+  });
+  preview.style.display = 'none';
+  questionDiv.style.display = 'none';
+  answerDiv.style.display = 'none';
+  filename = '';
+});
+</script>
 
 </body>
 </html>
