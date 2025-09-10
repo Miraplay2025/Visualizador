@@ -1,3 +1,4 @@
 Flask==2.2.2
 transformers==4.10.0
-torch==2.5.0  # ou outra versão mais recente disponível
+torch==2.5.0
+tokenizers==0.10.3
