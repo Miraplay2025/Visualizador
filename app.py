@@ -1,4 +1,3 @@
-
 import os
 from flask import Flask, render_template, request, redirect, url_for
 from werkzeug.utils import secure_filename
@@ -16,9 +15,9 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
-# Carrega modelo LLaVA (Tiny ou outro)
+# Carrega modelo LLaVA
 model_name = "llava_tiny"
-llava_model, preprocess = load_model_and_preprocess(model_name, device="cpu")  # troque para "cuda" se GPU
+llava_model, preprocess = load_model_and_preprocess(model_name, device="cpu")  # ou "cuda"
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -42,7 +41,7 @@ def index():
             image_url = url_for('uploaded_file', filename=filename)
             image_name = filename
 
-    # Pergunta sobre imagem existente
+    # Pergunta sobre a imagem
     if request.method == 'POST' and 'question' in request.form and 'image_name' in request.form:
         question = request.form['question']
         image_name = request.form['image_name']
@@ -50,7 +49,7 @@ def index():
             image_path = images_dict[image_name]
             img = preprocess(Image.open(image_path)).unsqueeze(0)
 
-            # Gera resposta real usando LLaVA
+            # Resposta real do LLaVA
             answer = llava_model.generate({"image": img, "text_input": question}, max_new_tokens=200)[0]
 
             image_url = url_for('uploaded_file', filename=image_name)
