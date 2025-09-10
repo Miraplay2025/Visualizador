@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BLIP-2 JS Perguntas sobre Imagens</title>
+<style>
+body { font-family: Arial; display:flex; flex-direction: column; align-items: center; padding:40px; background:#f9f9f9; }
+h1 { margin-bottom:20px; }
+.upload-btn, #askBtn, #deleteBtn { padding:15px 25px; border:none; border-radius:8px; cursor:pointer; margin:5px; color:#fff; }
+.upload-btn { background:#4CAF50; }
+.upload-btn:hover { background:#45a049; }
+#askBtn { background:#2196F3; }
+#askBtn:hover { background:#1976D2; }
+#deleteBtn { background:#f44336; }
+#deleteBtn:hover { background:#d32f2f; }
+input[type=file] { display:none; }
+#preview { max-width:80%; border-radius:8px; margin-top:10px; display:none; }
+#question { margin-top:15px; padding:10px; width:80%; max-width:400px; border-radius:6px; border:1px solid #ccc; }
+#loading { display:none; margin-top:15px; color:#555; }
+#answer { margin-top:20px; padding:15px; background:#f1f1f1; border-radius:6px; max-width:80%; word-wrap:break-word; display:none; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+
+<h1>BLIP-2 JS: Pergunte sobre sua imagem</h1>
+
+<label class="upload-btn" for="imageInput">Escolher Imagem</label>
+<input type="file" id="imageInput" accept="image/*">
+<img id="preview" src="" alt="Pré-visualização">
+
+<input type="text" id="question" placeholder="Digite sua pergunta sobre a imagem">
+<button id="askBtn">Perguntar</button>
+<button id="deleteBtn">Excluir Imagem</button>
+
+<div id="loading">Processando imagem, aguarde...</div>
+<div id="answer"></div>
+
+<script>
+let selectedFile = null;
+let filename = null;
+
+const imageInput = document.getElementById('imageInput');
+const preview = document.getElementById('preview');
+const questionInput = document.getElementById('question');
+const askBtn = document.getElementById('askBtn');
+const deleteBtn = document.getElementById('deleteBtn');
+const loading = document.getElementById('loading');
+const answer = document.getElementById('answer');
+
+// Upload imagem
+imageInput.addEventListener('change', async () => {
+  const file = imageInput.files[0];
+  if (!file) return;
+
+  selectedFile = file;
+  const formData = new FormData();
+  formData.append('image', file);
+
+  loading.style.display = 'block';
+  answer.style.display = 'none';
+
+  const res = await fetch('/upload-image', { method:'POST', body:formData });
+  const data = await res.json();
+  loading.style.display = 'none';
+
+  if (data.filename) {
+    filename = data.filename;
+    preview.src = URL.createObjectURL(file);
+    preview.style.display = 'block';
+  }
+});
+
+// Pergunta sobre imagem
+askBtn.addEventListener('click', async () => {
+  if (!filename || !questionInput.value) return;
+
+  loading.style.display = 'block';
+  answer.style.display = 'none';
+
+  const res = await fetch('/ask-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename, question: questionInput.value })
+  });
+  const data = await res.json();
+  loading.style.display = 'none';
+  answer.textContent = data.answer || 'Nenhuma resposta';
+  answer.style.display = 'block';
+});
+
+// Excluir imagem
+deleteBtn.addEventListener('click', async () => {
+  if (!filename) return;
+  const res = await fetch('/delete-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename })
+  });
+  const data = await res.json();
+  if (data.success) {
+    preview.src = '';
+    preview.style.display = 'none';
+    filename = null;
+    answer.style.display = 'none';
+    questionInput.value = '';
+    alert('Imagem excluída com sucesso!');
+  }
+});
+</script>
+
+</body>
+</html>
