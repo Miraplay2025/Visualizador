@@ -1,9 +1,10 @@
+
 import os
 from flask import Flask, render_template, request, redirect, url_for
 from werkzeug.utils import secure_filename
 from PIL import Image
 
-# Import LLaVA real
+# Import do LLaVA (após instalação via clone)
 from llava.model import load_model_and_preprocess
 
 UPLOAD_FOLDER = 'uploads'
@@ -12,18 +13,16 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'bmp'}
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Cria pasta uploads se não existir
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
 # Carrega modelo LLaVA (Tiny ou outro)
 model_name = "llava_tiny"
-llava_model, preprocess = load_model_and_preprocess(model_name, device="cpu")  # troque para "cuda" se GPU disponível
+llava_model, preprocess = load_model_and_preprocess(model_name, device="cpu")  # troque para "cuda" se GPU
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Dicionário para armazenar imagens temporariamente
 images_dict = {}
 
 @app.route("/", methods=['GET', 'POST'])
@@ -62,7 +61,6 @@ def index():
 def uploaded_file(filename):
     return redirect(url_for('static', filename='uploads/' + filename))
 
-# Excluir imagem manualmente
 @app.route('/delete/<filename>', methods=['POST'])
 def delete_file(filename):
     if filename in images_dict:
