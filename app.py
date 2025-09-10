@@ -1,36 +1,27 @@
 from flask import Flask, render_template, request, jsonify
 import os
 from PIL import Image
-import torch
-import cv2
-import numpy as np
 import tesserocr
-from detectron2.engine import DefaultPredictor
-from detectron2.config import get_cfg
-from detectron2 import model_zoo
-from detectron2.utils.visualizer import Visualizer
+from ultralytics import YOLO
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'static/uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-# ----------------------
-# Configuração Detectron2
-cfg = get_cfg()
-cfg.merge_from_file(model_zoo.get_config_file("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml"))
-cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.5
-cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url("COCO-Detection/faster_rcnn_R_50_FPN_3x.yaml")
-predictor = DefaultPredictor(cfg)
+# Carregar modelo YOLOv8 pré-treinado (nano, leve)
+model = YOLO("yolov8n.pt")
 
-# Função para detectar objetos
+# Função para detectar objetos usando YOLOv8
 def detectar_objetos(imagem_path):
-    img = cv2.imread(imagem_path)
-    outputs = predictor(img)
-    classes = outputs["instances"].pred_classes.cpu().numpy()
-    labels = [predictor.metadata.get("thing_classes")[c] for c in classes]
-    return labels
+    results = model(imagem_path)
+    objetos = []
+    for r in results:
+        if hasattr(r, "boxes") and r.boxes is not None:
+            for cls_id in r.boxes.cls:
+                objetos.append(model.names[int(cls_id)])
+    return objetos
 
-# Função para extrair texto
+# Função para extrair texto usando Tesseract
 def detectar_texto(imagem_path):
     img = Image.open(imagem_path)
     text = tesserocr.image_to_text(img)
