@@ -1,21 +1,29 @@
-# Base PyTorch com CUDA
-FROM pytorch/pytorch:2.1.0-cuda11.8-cudnn8-runtime
+# Use Node.js LTS
+FROM node:20-slim
 
-# Instala dependências do sistema
-RUN apt-get update && apt-get install -y git wget libgl1 libglib2.0-0
+# Instalar Python
+RUN apt-get update && \
+    apt-get install -y python3 python3-pip && \
+    apt-get clean
 
-# Define diretório
+# Diretório da app
 WORKDIR /app
 
-# Copia arquivos
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copiar arquivos
+COPY package.json package-lock.json* ./ 
+COPY requirements.txt ./ 
+COPY server.js ./ 
+COPY ocr.py ./ 
+COPY public ./public
 
-COPY . .
+# Instalar dependências Node
+RUN npm install
 
-# Expõe porta do Render
-ENV PORT=10000
+# Instalar dependências Python
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Comando para rodar
-CMD ["python", "server.py"]
+# Expor porta
+EXPOSE 3000
 
+# Comando para iniciar
+CMD ["node", "server.js"]
