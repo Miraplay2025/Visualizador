@@ -1,4 +1,4 @@
- <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="pt">
 <head>
   <meta charset="UTF-8">
@@ -26,41 +26,19 @@
       height: 40vh;
       margin-bottom: 15px;
     }
-    .hidden {
-      display: none;
-    }
-    form {
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-    input, textarea, button {
-      padding: 10px;
-      border-radius: 8px;
-      border: 1px solid #ccc;
-      font-size: 14px;
-    }
-    button {
-      background: #25d366;
-      color: white;
-      border: none;
-      cursor: pointer;
-      transition: 0.3s;
-    }
-    button:hover {
-      background: #20b857;
-    }
-    #status {
-      margin-top: 10px;
-      font-weight: bold;
-    }
+    .hidden { display: none; }
+    form { display: flex; flex-direction: column; gap: 10px; }
+    input, textarea, button { padding: 10px; border-radius: 8px; border: 1px solid #ccc; font-size: 14px; }
+    button { background: #25d366; color: white; border: none; cursor: pointer; transition: 0.3s; }
+    button:hover { background: #20b857; }
+    #status { margin-top: 10px; font-weight: bold; }
   </style>
 </head>
 <body>
   <div class="container">
     <div id="qr-section">
       <h2>Escaneie o QR Code</h2>
-      <img id="qr" src="" alt="QR Code">
+      <img id="qr" src="/qr.png" alt="QR Code">
       <p id="qr-status">Aguardando QR Code...</p>
     </div>
 
@@ -76,42 +54,36 @@
   </div>
 
   <script>
-    async function fetchQR() {
+    async function fetchStatus() {
       try {
-        const res = await fetch("/qr");
+        const res = await fetch("/status");
         const data = await res.json();
-
         if (data.connected) {
-          // Conectado: mostra formulário e esconde QR
           document.getElementById("qr-section").classList.add("hidden");
           document.getElementById("form-section").classList.remove("hidden");
-        } else if (data.qr) {
-          // Atualiza QR Code base64
-          const qrImg = data.qr.startsWith("data:image/png;base64,")
-            ? data.qr
-            : "data:image/png;base64," + data.qr;
-          document.getElementById("qr").src = qrImg + "?" + Date.now(); // força atualização
-          document.getElementById("qr-section").classList.remove("hidden");
-          document.getElementById("qr-status").textContent = "📲 Escaneie o QR Code no WhatsApp";
         } else {
-          document.getElementById("qr-status").textContent = "⏳ Aguardando QR Code...";
+          document.getElementById("qr-section").classList.remove("hidden");
+          document.getElementById("form-section").classList.add("hidden");
         }
       } catch (err) {
-        console.error("Erro ao buscar QR:", err);
-        document.getElementById("qr-status").textContent = "⚠️ Erro ao carregar QR";
+        console.error("Erro ao buscar status:", err);
       }
     }
 
-    // Atualiza QR a cada 30 segundos
-    fetchQR();
-    setInterval(fetchQR, 30000);
+    function refreshQR() {
+      const qrImg = document.getElementById("qr");
+      qrImg.src = "/qr.png?" + Date.now(); // força atualização
+    }
+
+    // Atualiza QR a cada 39 segundos
+    refreshQR();
+    setInterval(() => { refreshQR(); fetchStatus(); }, 39000);
 
     // Enviar mensagem
     document.getElementById("msgForm").addEventListener("submit", async (e) => {
       e.preventDefault();
       const number = document.getElementById("number").value.trim();
       const message = document.getElementById("message").value.trim();
-
       if (!number || !message) return;
 
       document.getElementById("status").textContent = "⏳ Enviando...";
@@ -122,11 +94,7 @@
           body: JSON.stringify({ number, message }),
         });
         const data = await res.json();
-        if (data.success) {
-          document.getElementById("status").textContent = "✅ Mensagem enviada!";
-        } else {
-          document.getElementById("status").textContent = "❌ Erro: " + (data.error || "desconhecido");
-        }
+        document.getElementById("status").textContent = data.success ? "✅ Mensagem enviada!" : "❌ Erro: " + (data.error || "desconhecido");
       } catch (err) {
         document.getElementById("status").textContent = "❌ Erro ao enviar mensagem";
         console.error(err);
@@ -135,4 +103,3 @@
   </script>
 </body>
 </html>
-       
