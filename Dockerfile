@@ -43,15 +43,14 @@ RUN apt-get update && apt-get install -y \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
 
-# Cria usuário não-root
-RUN useradd -ms /bin/bash pptruser
-USER pptruser
-
 COPY package.json ./
-RUN npm install --production
+RUN npm install --production   # instala como root
 
 COPY . .
 
-EXPOSE 10000
+# Cria usuário não-root
+RUN useradd -ms /bin/bash pptruser && chown -R pptruser /app
+USER pptruser
 
+EXPOSE 10000
 CMD ["npm", "start"]
