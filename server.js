@@ -14,6 +14,9 @@ let connected = false;
 // Inicia sessão
 wppconnect.create({
   session: "render-session",
+  puppeteerOptions: {
+    args: ["--no-sandbox", "--disable-setuid-sandbox"], // necessário no Render
+  },
   catchQR: (base64Qr) => {
     qrCodeBase64 = base64Qr;
     connected = false;
@@ -28,7 +31,7 @@ wppconnect.create({
 .then((cli) => {
   client = cli;
 })
-.catch((err) => console.error(err));
+.catch((err) => console.error("Erro ao iniciar WPPConnect:", err));
 
 // Endpoint para pegar QR Code
 app.get("/qr", (req, res) => {
@@ -42,11 +45,14 @@ app.get("/qr", (req, res) => {
 app.post("/send", async (req, res) => {
   try {
     const { number, message } = req.body;
-    if (!connected) return res.status(400).json({ error: "Não conectado" });
+    if (!connected) {
+      return res.status(400).json({ error: "Não conectado ao WhatsApp" });
+    }
 
     await client.sendText(number + "@c.us", message);
     res.json({ success: true });
   } catch (err) {
+    console.error("Erro ao enviar mensagem:", err);
     res.status(500).json({ error: "Erro ao enviar mensagem", details: err.message });
   }
 });
@@ -56,4 +62,3 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
 });
-
