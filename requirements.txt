@@ -1,4 +1,4 @@
-easyocr
-opencv-python-headless
-numpy
-torch
+torch==2.3.1
+easyocr==1.7.0
+opencv-python-headless==4.8.1.78
+numpy==1.26.0
