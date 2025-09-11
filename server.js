@@ -3,7 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const Tesseract = require('tesseract.js');
 const fs = require('fs');
-const cv = require('opencv4nodejs'); // OpenCV para manipulação de imagens
+const cv = require('@u4/opencv4nodejs-prebuilt');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -27,38 +27,28 @@ const upload = multer({ storage });
 // Servir arquivos estáticos
 app.use(express.static('public'));
 
-// Função para detectar as bordas e recortar a área do botão
+// Função para detectar contornos/botões e extrair texto
 async function extractButtonText(imagePath) {
   const image = cv.imread(imagePath);
-
-  // Convertendo a imagem para escala de cinza
   const gray = image.bgrToGray();
-
-  // Aplicar o filtro de Canny para detectar bordas
   const edges = gray.canny(50, 150);
-
-  // Encontrar os contornos nas bordas detectadas
   const contours = edges.findContours(cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
 
   for (let contour of contours) {
-    // Obter o retângulo delimitador de cada contorno
     const rect = contour.boundingRect();
-
-    // Filtrar apenas as áreas que provavelmente são botões (baseado em critérios de borda)
-    // Você pode adicionar condições aqui se necessário, mas aqui vamos usar apenas os contornos
-    const buttonRegion = image.getRegion(rect);  // Recorta a área
-
-    // Salvar a imagem recortada da área detectada
+    const buttonRegion = image.getRegion(rect);
     const buttonPath = path.join(uploadDir, 'button_area.jpg');
     cv.imwrite(buttonPath, buttonRegion);
 
-    // Agora, passe a imagem recortada para o Tesseract
-    const { data: { text } } = await Tesseract.recognize(buttonPath, 'por');
-    fs.unlinkSync(buttonPath); // Apagar a imagem recortada após o OCR
-    return text;
+    try {
+      const { data: { text } } = await Tesseract.recognize(buttonPath, 'por');
+      fs.unlinkSync(buttonPath);
+      return text.trim();
+    } catch (err) {
+      if (fs.existsSync(buttonPath)) fs.unlinkSync(buttonPath);
+    }
   }
-
-  return null; // Caso não encontre um botão
+  return null;
 }
 
 // Endpoint para extrair texto
@@ -68,19 +58,11 @@ app.post('/extract-text', upload.single('image'), async (req, res) => {
   const imagePath = req.file.path;
 
   try {
-    // Extrair o texto da área do botão
     const buttonText = await extractButtonText(imagePath);
-
-    if (buttonText) {
-      // Apagar a imagem original após o processamento
-      fs.unlinkSync(imagePath);
-      res.json({ text: buttonText });
-    } else {
-      // Caso não consiga encontrar um botão
-      res.status(404).json({ error: 'Botão não encontrado' });
-    }
+    fs.unlinkSync(imagePath);
+    if (buttonText) res.json({ text: buttonText });
+    else res.status(404).json({ error: 'Botão não encontrado' });
   } catch (err) {
-    // Apagar a imagem original mesmo em caso de erro
     if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
     res.status(500).json({ error: 'Erro ao extrair texto' });
   }
