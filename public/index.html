@@ -1,16 +1,14 @@
+
 <!DOCTYPE html>
 <html lang="pt">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OCR EasyOCR</title>
+<title>OCR com Botão</title>
 <style>
-body { font-family: Arial, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 50px; background: #f9f9f9; }
+body { font-family: Arial; display: flex; flex-direction: column; align-items: center; padding: 50px; background: #f9f9f9; }
 h1 { margin-bottom: 20px; }
-.upload-btn { 
-  background-color: #4CAF50; color: white; padding: 15px 25px; border: none; border-radius: 8px; cursor: pointer;
-  transition: background 0.3s;
-}
+.upload-btn { background-color: #4CAF50; color: white; padding: 15px 25px; border: none; border-radius: 8px; cursor: pointer; transition: background 0.3s; }
 .upload-btn:hover { background-color: #45a049; }
 input[type=file] { display: none; }
 #preview { max-width: 80%; margin-top: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display:none; }
@@ -22,7 +20,7 @@ input[type=file] { display: none; }
 </head>
 <body>
 
-<h1>Extrair Texto da Imagem</h1>
+<h1>Extrair Texto do Botão</h1>
 <label class="upload-btn" for="imageInput">Escolher Imagem</label>
 <input type="file" id="imageInput" accept="image/*">
 <img id="preview" src="" alt="Pré-visualização">
@@ -61,14 +59,12 @@ extractBtn.addEventListener('click', async () => {
     const res = await fetch('/extract-text', { method: 'POST', body: formData });
     const data = await res.json();
     loading.style.display = 'none';
-    result.textContent = data.text || 'Nenhum texto encontrado';
+    result.textContent = data.text || 'Nenhum botão encontrado';
     result.style.display = 'block';
   } catch (err) {
     loading.style.display = 'none';
     result.textContent = 'Erro ao processar a imagem';
     result.style.display = 'block';
-  } finally {
-    extractBtn.style.display = 'inline-block';
   }
 });
 </script>
