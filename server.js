@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const wppconnect = require("@wppconnect-team/wppconnect");
-const { createCanvas } = require("canvas");
 
 const app = express();
 app.use(cors());
@@ -12,7 +11,7 @@ let client = null;
 let qrCodeBase64 = null;
 let connected = false;
 
-// Inicia sessão
+// Inicia sessão WPPConnect
 wppconnect.create({
   session: "render-session",
   puppeteerOptions: {
@@ -35,42 +34,29 @@ wppconnect.create({
     connected = statusSession === "inChat";
     if (connected) console.log("✅ Conectado ao WhatsApp");
   },
-  logQR: false, // não loga no console o QR
+  logQR: false,
 })
   .then((cli) => {
     client = cli;
   })
   .catch((err) => console.error("Erro ao iniciar WPPConnect:", err));
 
-// Função para criar imagem de "Aguardando QR Code"
-function generateWaitingImage() {
-  const canvas = createCanvas(300, 300);
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#f5f7fa";
-  ctx.fillRect(0, 0, 300, 300);
-  ctx.fillStyle = "#333";
-  ctx.font = "20px Arial";
-  ctx.textAlign = "center";
-  ctx.fillText("Aguardando QR Code...", 150, 150);
-  return canvas.toBuffer("image/png");
-}
-
-// Endpoint para pegar QR como imagem PNG
+// Endpoint para retornar QR como PNG
 app.get("/qr.png", (req, res) => {
-  let imgBuffer;
   if (qrCodeBase64) {
-    imgBuffer = Buffer.from(qrCodeBase64.replace(/^data:image\/png;base64,/, ""), "base64");
+    const imgBuffer = Buffer.from(qrCodeBase64.replace(/^data:image\/png;base64,/, ""), "base64");
+    res.writeHead(200, {
+      "Content-Type": "image/png",
+      "Content-Length": imgBuffer.length,
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+    });
+    res.end(imgBuffer);
   } else {
-    imgBuffer = generateWaitingImage();
+    // Se ainda não houver QR, apenas retorna 204 No Content
+    res.status(204).send();
   }
-  res.writeHead(200, {
-    "Content-Type": "image/png",
-    "Content-Length": imgBuffer.length,
-    "Cache-Control": "no-cache, no-store, must-revalidate",
-    Pragma: "no-cache",
-    Expires: "0",
-  });
-  res.end(imgBuffer);
 });
 
 // Endpoint para enviar mensagem
@@ -87,7 +73,7 @@ app.post("/send", async (req, res) => {
   }
 });
 
-// Endpoint para verificar status
+// Status da sessão
 app.get("/status", (req, res) => {
   res.json({ connected });
 });
