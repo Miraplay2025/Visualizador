@@ -28,17 +28,33 @@ wppconnect.create({
     }
   },
 })
-.then((cli) => {
-  client = cli;
-})
-.catch((err) => console.error("Erro ao iniciar WPPConnect:", err));
+  .then((cli) => {
+    client = cli;
+  })
+  .catch((err) => console.error("Erro ao iniciar WPPConnect:", err));
 
-// Endpoint para pegar QR Code
-app.get("/qr", (req, res) => {
-  if (connected) {
-    return res.json({ connected: true });
+// Endpoint para pegar QR como imagem
+app.get("/qr.png", (req, res) => {
+  if (!qrCodeBase64) {
+    return res.status(404).send("QR code ainda não gerado");
   }
-  res.json({ connected: false, qr: qrCodeBase64 });
+  const img = Buffer.from(
+    qrCodeBase64.replace(/^data:image\/png;base64,/, ""),
+    "base64"
+  );
+  res.writeHead(200, {
+    "Content-Type": "image/png",
+    "Content-Length": img.length,
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    Pragma: "no-cache",
+    Expires: "0",
+  });
+  res.end(img);
+});
+
+// Endpoint para verificar conexão
+app.get("/status", (req, res) => {
+  res.json({ connected });
 });
 
 // Endpoint para enviar mensagem
@@ -53,7 +69,9 @@ app.post("/send", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error("Erro ao enviar mensagem:", err);
-    res.status(500).json({ error: "Erro ao enviar mensagem", details: err.message });
+    res
+      .status(500)
+      .json({ error: "Erro ao enviar mensagem", details: err.message });
   }
 });
 
