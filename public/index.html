@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="pt">
 <head>
   <meta charset="UTF-8">
@@ -82,12 +82,16 @@
         const data = await res.json();
 
         if (data.connected) {
-          // Conectado, mostra formulário
+          // Conectado: mostra formulário e esconde QR
           document.getElementById("qr-section").classList.add("hidden");
           document.getElementById("form-section").classList.remove("hidden");
         } else if (data.qr) {
           // Atualiza QR Code base64
-          document.getElementById("qr").src = data.qr;
+          const qrImg = data.qr.startsWith("data:image/png;base64,")
+            ? data.qr
+            : "data:image/png;base64," + data.qr;
+          document.getElementById("qr").src = qrImg + "?" + Date.now(); // força atualização
+          document.getElementById("qr-section").classList.remove("hidden");
           document.getElementById("qr-status").textContent = "📲 Escaneie o QR Code no WhatsApp";
         } else {
           document.getElementById("qr-status").textContent = "⏳ Aguardando QR Code...";
@@ -131,3 +135,4 @@
   </script>
 </body>
 </html>
+       
