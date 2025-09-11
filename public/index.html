@@ -22,7 +22,7 @@
       width: 320px;
     }
     img {
-      width: 90px;
+      width: 90px; /* largura fixa */
       height: 40vh;
       margin-bottom: 15px;
     }
@@ -75,6 +75,9 @@
   </div>
 
   <script>
+    const qrImg = document.getElementById("qr");
+    const qrText = document.getElementById("qrText");
+
     async function updateQR() {
       try {
         const statusRes = await fetch("/status");
@@ -86,30 +89,34 @@
         } else {
           document.getElementById("qr-section").classList.remove("hidden");
           document.getElementById("form-section").classList.add("hidden");
-
-          const qrImg = document.getElementById("qr");
-          const qrText = document.getElementById("qrText");
-
-          // Tenta carregar o QR
-          const timestamp = new Date().getTime();
-          qrImg.src = "/qr.png?timestamp=" + timestamp;
-
-          // Se ainda não houver QR, exibe texto
-          qrImg.onerror = () => {
-            qrImg.src = "";
-            qrText.textContent = "Aguardando QR Code...";
-          };
-
-          qrImg.onload = () => {
-            qrText.textContent = "";
-          };
+          fetchQRCode();
         }
       } catch (err) {
-        console.error("Erro ao atualizar QR", err);
+        console.error("Erro ao atualizar status", err);
       }
     }
 
-    // Atualiza QR a cada 30 segundos
+    async function fetchQRCode() {
+      try {
+        const timestamp = new Date().getTime();
+        const res = await fetch("/qr.png?timestamp=" + timestamp);
+        if (res.status === 200) {
+          const blob = await res.blob();
+          qrImg.src = URL.createObjectURL(blob);
+          qrText.textContent = "";
+        } else {
+          qrImg.src = "";
+          qrText.textContent = "Aguardando QR Code...";
+          setTimeout(fetchQRCode, 3000);
+        }
+      } catch (err) {
+        qrImg.src = "";
+        qrText.textContent = "Aguardando QR Code...";
+        setTimeout(fetchQRCode, 3000);
+      }
+    }
+
+    // Atualiza QR principal a cada 30 segundos
     updateQR();
     setInterval(updateQR, 30000);
 
