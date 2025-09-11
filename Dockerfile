@@ -1,21 +1,12 @@
-FROM node:20-bullseye
+FROM node:18-slim
 
-# Dependências básicas
-RUN apt-get update && apt-get install -y \
-    libgtk-3-dev libjpeg-dev libpng-dev libtiff-dev build-essential \
-    python3 && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
 
-WORKDIR /usr/src/app
+COPY package.json ./
+RUN npm install --production
 
-COPY package*.json ./
-RUN npm install
+COPY . .
 
-COPY server.js ./
-COPY public ./public
-
-# Criar pasta uploads
-RUN mkdir -p uploads
-
-EXPOSE 3000
+EXPOSE 10000
 
 CMD ["npm", "start"]
