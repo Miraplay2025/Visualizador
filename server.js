@@ -1,11 +1,10 @@
- const express = require("express");
+const express = require("express");
 const cors = require("cors");
 const wppconnect = require("@wppconnect-team/wppconnect");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static("public"));
 
 let client = null;
 let qrCodeBase64 = null;
@@ -44,7 +43,6 @@ wppconnect.create({
 // Endpoint para pegar QR como imagem PNG
 app.get("/qr.png", (req, res) => {
   if (!qrCodeBase64) {
-    // Retorna status 404 mas com mensagem de texto no HTML
     return res.status(404).send("QR code ainda não gerado");
   }
 
@@ -88,4 +86,3 @@ app.get("/status", (req, res) => {
 // Porta para Render
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
-       
