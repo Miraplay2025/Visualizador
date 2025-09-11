@@ -50,6 +50,10 @@
     button:hover {
       background: #20b857;
     }
+    #status {
+      margin-top: 10px;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -57,7 +61,9 @@
     <div id="qr-section">
       <h2>Escaneie o QR Code</h2>
       <img id="qr" src="" alt="QR Code">
+      <p id="qr-status">Aguardando QR Code...</p>
     </div>
+
     <div id="form-section" class="hidden">
       <h2>Enviar Mensagem</h2>
       <form id="msgForm">
@@ -76,13 +82,19 @@
         const data = await res.json();
 
         if (data.connected) {
+          // Conectado, mostra formulário
           document.getElementById("qr-section").classList.add("hidden");
           document.getElementById("form-section").classList.remove("hidden");
         } else if (data.qr) {
+          // Atualiza QR Code base64
           document.getElementById("qr").src = data.qr;
+          document.getElementById("qr-status").textContent = "📲 Escaneie o QR Code no WhatsApp";
+        } else {
+          document.getElementById("qr-status").textContent = "⏳ Aguardando QR Code...";
         }
       } catch (err) {
         console.error("Erro ao buscar QR:", err);
+        document.getElementById("qr-status").textContent = "⚠️ Erro ao carregar QR";
       }
     }
 
@@ -93,19 +105,28 @@
     // Enviar mensagem
     document.getElementById("msgForm").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const number = document.getElementById("number").value;
-      const message = document.getElementById("message").value;
+      const number = document.getElementById("number").value.trim();
+      const message = document.getElementById("message").value.trim();
 
-      const res = await fetch("/send", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ number, message }),
-      });
+      if (!number || !message) return;
 
-      const data = await res.json();
-      document.getElementById("status").textContent = data.success
-        ? "✅ Mensagem enviada!"
-        : "❌ Erro: " + (data.error || "desconhecido");
+      document.getElementById("status").textContent = "⏳ Enviando...";
+      try {
+        const res = await fetch("/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ number, message }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById("status").textContent = "✅ Mensagem enviada!";
+        } else {
+          document.getElementById("status").textContent = "❌ Erro: " + (data.error || "desconhecido");
+        }
+      } catch (err) {
+        document.getElementById("status").textContent = "❌ Erro ao enviar mensagem";
+        console.error(err);
+      }
     });
   </script>
 </body>
