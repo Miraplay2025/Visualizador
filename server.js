@@ -1,83 +1,147 @@
-const express = require("express");
-const cors = require("cors");
-const wppconnect = require("@wppconnect-team/wppconnect");
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8">
+  <title>WhatsApp - Conexão</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f7fa;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .container {
+      text-align: center;
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      width: 320px;
+    }
+    img {
+      width: 90px;
+      height: 40vh;
+      margin-bottom: 15px;
+    }
+    .hidden {
+      display: none;
+    }
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    input, textarea, button {
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+    }
+    button {
+      background: #25d366;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    button:hover {
+      background: #20b857;
+    }
+    #statusMsg, #qrText {
+      margin-top: 10px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="qr-section">
+      <h2>Escaneie o QR Code</h2>
+      <img id="qr" src="" alt="QR Code">
+      <p id="qrText">Aguardando QR Code...</p>
+    </div>
+    <div id="form-section" class="hidden">
+      <h2>Enviar Mensagem</h2>
+      <form id="msgForm">
+        <input type="text" id="number" placeholder="Número (ex: 25884xxxxxxx)" required>
+        <textarea id="message" placeholder="Digite sua mensagem" required></textarea>
+        <button type="submit">Enviar</button>
+      </form>
+      <p id="statusMsg"></p>
+    </div>
+  </div>
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-app.use(express.static("public"));
+  <script>
+    const qrImg = document.getElementById("qr");
+    const qrText = document.getElementById("qrText");
 
-let client = null;
-let qrCodeBase64 = null;
-let connected = false;
+    async function updateQR() {
+      try {
+        const statusRes = await fetch("/status");
+        const statusData = await statusRes.json();
 
-// Inicia sessão WPPConnect
-wppconnect.create({
-  session: "render-session",
-  puppeteerOptions: {
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-extensions",
-      "--disable-gpu",
-    ],
-  },
-  autoClose: 0, // nunca fecha a página automaticamente
-  catchQR: (base64Qr) => {
-    qrCodeBase64 = base64Qr;
-    connected = false;
-    console.log("Novo QR gerado");
-  },
-  statusFind: (statusSession) => {
-    console.log("STATUS:", statusSession);
-    connected = statusSession === "inChat";
-    if (connected) console.log("✅ Conectado ao WhatsApp");
-  },
-  logQR: false,
-})
-  .then((cli) => {
-    client = cli;
-  })
-  .catch((err) => console.error("Erro ao iniciar WPPConnect:", err));
+        if (statusData.connected) {
+          document.getElementById("qr-section").classList.add("hidden");
+          document.getElementById("form-section").classList.remove("hidden");
+        } else {
+          document.getElementById("qr-section").classList.remove("hidden");
+          document.getElementById("form-section").classList.add("hidden");
+          fetchQRCode();
+        }
+      } catch (err) {
+        console.error("Erro ao atualizar status", err);
+      }
+    }
 
-// Endpoint para retornar QR como PNG
-app.get("/qr.png", (req, res) => {
-  if (qrCodeBase64) {
-    const imgBuffer = Buffer.from(qrCodeBase64.replace(/^data:image\/png;base64,/, ""), "base64");
-    res.writeHead(200, {
-      "Content-Type": "image/png",
-      "Content-Length": imgBuffer.length,
-      "Cache-Control": "no-cache, no-store, must-revalidate",
-      Pragma: "no-cache",
-      Expires: "0",
+    async function fetchQRCode() {
+      try {
+        const timestamp = new Date().getTime();
+        const res = await fetch("/qr.png?timestamp=" + timestamp);
+        if (res.status === 200) {
+          const blob = await res.blob();
+          qrImg.src = URL.createObjectURL(blob);
+          qrText.textContent = "";
+        } else {
+          qrImg.src = "";
+          qrText.textContent = "Aguardando QR Code...";
+          // tenta novamente em 3 segundos
+          setTimeout(fetchQRCode, 3000);
+        }
+      } catch (err) {
+        qrImg.src = "";
+        qrText.textContent = "Aguardando QR Code...";
+        setTimeout(fetchQRCode, 3000);
+      }
+    }
+
+    // Atualiza QR principal a cada 30 segundos
+    updateQR();
+    setInterval(updateQR, 30000);
+
+    // Enviar mensagem
+    document.getElementById("msgForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const number = document.getElementById("number").value;
+      const message = document.getElementById("message").value;
+
+      try {
+        const res = await fetch("/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ number, message }),
+        });
+        const data = await res.json();
+        document.getElementById("statusMsg").textContent = data.success
+          ? "✅ Mensagem enviada!"
+          : "❌ Erro: " + (data.error || "desconhecido");
+      } catch (err) {
+        document.getElementById("statusMsg").textContent = "❌ Erro ao enviar mensagem";
+        console.error(err);
+      }
     });
-    res.end(imgBuffer);
-  } else {
-    // Se ainda não houver QR, apenas retorna 204 No Content
-    res.status(204).send();
-  }
-});
-
-// Endpoint para enviar mensagem
-app.post("/send", async (req, res) => {
-  try {
-    const { number, message } = req.body;
-    if (!connected) return res.status(400).json({ error: "Não conectado ao WhatsApp" });
-
-    await client.sendText(number + "@c.us", message);
-    res.json({ success: true });
-  } catch (err) {
-    console.error("Erro ao enviar mensagem:", err);
-    res.status(500).json({ error: "Erro ao enviar mensagem", details: err.message });
-  }
-});
-
-// Status da sessão
-app.get("/status", (req, res) => {
-  res.json({ connected });
-});
-
-// Porta para Render
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
+  </script>
+</body>
+</html>
