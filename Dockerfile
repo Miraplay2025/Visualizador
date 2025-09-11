@@ -2,7 +2,7 @@ FROM node:18-slim
 
 WORKDIR /app
 
-# Instala dependências do Chromium
+# Dependências do Chromium
 RUN apt-get update && apt-get install -y \
   wget \
   ca-certificates \
@@ -44,13 +44,12 @@ RUN apt-get update && apt-get install -y \
   rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
-RUN npm install --production   # instala como root
+
+# Instala dependências + força download do Chrome/Chromium do Puppeteer
+RUN npm install --production && \
+    npx puppeteer browsers install chrome
 
 COPY . .
-
-# Cria usuário não-root
-RUN useradd -ms /bin/bash pptruser && chown -R pptruser /app
-USER pptruser
 
 EXPOSE 10000
 CMD ["npm", "start"]
