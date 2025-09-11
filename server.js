@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const wppconnect = require("@wppconnect-team/wppconnect");
-const { createCanvas } = require("canvas"); // Para criar imagem de texto
+const { createCanvas } = require("canvas");
 
 const app = express();
 app.use(cors());
@@ -16,10 +16,17 @@ let connected = false;
 wppconnect.create({
   session: "render-session",
   puppeteerOptions: {
-    args: ["--no-sandbox", "--disable-setuid-sandbox"], // necessário no Render
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-extensions",
+      "--disable-gpu",
+    ],
   },
+  autoClose: 0, // nunca fecha a página automaticamente
   catchQR: (base64Qr) => {
-    qrCodeBase64 = base64Qr; // sempre atualiza
+    qrCodeBase64 = base64Qr;
     connected = false;
     console.log("Novo QR gerado");
   },
@@ -28,6 +35,7 @@ wppconnect.create({
     connected = statusSession === "inChat";
     if (connected) console.log("✅ Conectado ao WhatsApp");
   },
+  logQR: false, // não loga no console o QR
 })
   .then((cli) => {
     client = cli;
@@ -79,7 +87,7 @@ app.post("/send", async (req, res) => {
   }
 });
 
-// Status da sessão
+// Endpoint para verificar status
 app.get("/status", (req, res) => {
   res.json({ connected });
 });
@@ -87,4 +95,3 @@ app.get("/status", (req, res) => {
 // Porta para Render
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
-
