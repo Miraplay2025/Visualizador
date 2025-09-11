@@ -1,7 +1,7 @@
-# Use Node.js LTS
+# Base Node LTS
 FROM node:20-slim
 
-# Instalar Python
+# Instalar Python e dependências
 RUN apt-get update && \
     apt-get install -y python3 python3-pip && \
     apt-get clean
@@ -9,12 +9,15 @@ RUN apt-get update && \
 # Diretório da app
 WORKDIR /app
 
-# Copiar arquivos
+# Copiar arquivos essenciais
 COPY package.json package-lock.json* ./ 
 COPY requirements.txt ./ 
 COPY server.js ./ 
 COPY ocr.py ./ 
 COPY public ./public
+
+# Limpar cache do npm antes de instalar
+RUN npm cache clean --force
 
 # Instalar dependências Node
 RUN npm install
@@ -25,5 +28,5 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 # Expor porta
 EXPOSE 3000
 
-# Comando para iniciar
+# Iniciar servidor
 CMD ["node", "server.js"]
