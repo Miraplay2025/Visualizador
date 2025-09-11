@@ -1,73 +1,112 @@
-
 <!DOCTYPE html>
 <html lang="pt">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OCR com Botão</title>
-<style>
-body { font-family: Arial; display: flex; flex-direction: column; align-items: center; padding: 50px; background: #f9f9f9; }
-h1 { margin-bottom: 20px; }
-.upload-btn { background-color: #4CAF50; color: white; padding: 15px 25px; border: none; border-radius: 8px; cursor: pointer; transition: background 0.3s; }
-.upload-btn:hover { background-color: #45a049; }
-input[type=file] { display: none; }
-#preview { max-width: 80%; margin-top: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display:none; }
-#extractBtn { margin-top: 20px; padding: 10px 20px; display: none; border-radius: 6px; cursor: pointer; background:#2196F3; color:#fff; border:none; transition: background 0.3s; }
-#extractBtn:hover { background:#1976D2; }
-#loading { display:none; margin-top: 20px; color: #555; }
-#result { margin-top: 20px; padding: 15px; border-radius: 6px; background: #f1f1f1; max-width: 80%; word-wrap: break-word; display:none; white-space: pre-wrap; }
-</style>
+  <meta charset="UTF-8">
+  <title>WhatsApp - Conexão</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f7fa;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+    }
+    .container {
+      text-align: center;
+      background: white;
+      padding: 20px;
+      border-radius: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      width: 300px;
+    }
+    img {
+      width: 90px;
+      height: 40vh;
+      margin-bottom: 15px;
+    }
+    .hidden {
+      display: none;
+    }
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    input, textarea, button {
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+    }
+    button {
+      background: #25d366;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    button:hover {
+      background: #20b857;
+    }
+  </style>
 </head>
 <body>
+  <div class="container">
+    <div id="qr-section">
+      <h2>Escaneie o QR Code</h2>
+      <img id="qr" src="" alt="QR Code">
+    </div>
+    <div id="form-section" class="hidden">
+      <h2>Enviar Mensagem</h2>
+      <form id="msgForm">
+        <input type="text" id="number" placeholder="Número (ex: 25884xxxxxxx)" required>
+        <textarea id="message" placeholder="Digite sua mensagem" required></textarea>
+        <button type="submit">Enviar</button>
+      </form>
+      <p id="status"></p>
+    </div>
+  </div>
 
-<h1>Extrair Texto do Botão</h1>
-<label class="upload-btn" for="imageInput">Escolher Imagem</label>
-<input type="file" id="imageInput" accept="image/*">
-<img id="preview" src="" alt="Pré-visualização">
-<button id="extractBtn">Extrair Texto</button>
-<div id="loading">Extraindo texto, aguarde...</div>
-<div id="result"></div>
+  <script>
+    async function fetchQR() {
+      try {
+        const res = await fetch("/qr");
+        const data = await res.json();
 
-<script>
-const imageInput = document.getElementById('imageInput');
-const preview = document.getElementById('preview');
-const extractBtn = document.getElementById('extractBtn');
-const result = document.getElementById('result');
-const loading = document.getElementById('loading');
+        if (data.connected) {
+          document.getElementById("qr-section").classList.add("hidden");
+          document.getElementById("form-section").classList.remove("hidden");
+        } else if (data.qr) {
+          document.getElementById("qr").src = data.qr;
+        }
+      } catch (err) {
+        console.error("Erro ao buscar QR:", err);
+      }
+    }
 
-imageInput.addEventListener('change', () => {
-  const file = imageInput.files[0];
-  if (file) {
-    preview.src = URL.createObjectURL(file);
-    preview.style.display = 'block';
-    extractBtn.style.display = 'inline-block';
-    result.style.display = 'none';
-  }
-});
+    // Atualiza QR a cada 30 segundos
+    fetchQR();
+    setInterval(fetchQR, 30000);
 
-extractBtn.addEventListener('click', async () => {
-  const file = imageInput.files[0];
-  if (!file) return;
+    // Enviar mensagem
+    document.getElementById("msgForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const number = document.getElementById("number").value;
+      const message = document.getElementById("message").value;
 
-  const formData = new FormData();
-  formData.append('image', file);
+      const res = await fetch("/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ number, message }),
+      });
 
-  extractBtn.style.display = 'none';
-  loading.style.display = 'block';
-
-  try {
-    const res = await fetch('/extract-text', { method: 'POST', body: formData });
-    const data = await res.json();
-    loading.style.display = 'none';
-    result.textContent = data.text || 'Nenhum botão encontrado';
-    result.style.display = 'block';
-  } catch (err) {
-    loading.style.display = 'none';
-    result.textContent = 'Erro ao processar a imagem';
-    result.style.display = 'block';
-  }
-});
-</script>
-
+      const data = await res.json();
+      document.getElementById("status").textContent = data.success
+        ? "✅ Mensagem enviada!"
+        : "❌ Erro: " + (data.error || "desconhecido");
+    });
+  </script>
 </body>
 </html>
