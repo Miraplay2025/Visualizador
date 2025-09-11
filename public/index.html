@@ -19,29 +19,50 @@
       padding: 20px;
       border-radius: 12px;
       box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      width: 300px;
+      width: 320px;
     }
     img {
       width: 90px;
       height: 40vh;
       margin-bottom: 15px;
     }
-    .hidden { display: none; }
-    form { display: flex; flex-direction: column; gap: 10px; }
-    input, textarea, button { padding: 10px; border-radius: 8px; border: 1px solid #ccc; font-size: 14px; }
-    button { background: #25d366; color: white; border: none; cursor: pointer; transition: 0.3s; }
-    button:hover { background: #20b857; }
-    #status { margin-top: 10px; font-weight: bold; }
+    .hidden {
+      display: none;
+    }
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    input, textarea, button {
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #ccc;
+      font-size: 14px;
+    }
+    button {
+      background: #25d366;
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    button:hover {
+      background: #20b857;
+    }
+    #statusMsg, #qrText {
+      margin-top: 10px;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <div id="qr-section">
       <h2>Escaneie o QR Code</h2>
-      <img id="qr" src="/qr.png" alt="QR Code">
-      <p id="qr-status">Aguardando QR Code...</p>
+      <img id="qr" src="" alt="QR Code">
+      <p id="qrText">Aguardando QR Code...</p>
     </div>
-
     <div id="form-section" class="hidden">
       <h2>Enviar Mensagem</h2>
       <form id="msgForm">
@@ -49,44 +70,55 @@
         <textarea id="message" placeholder="Digite sua mensagem" required></textarea>
         <button type="submit">Enviar</button>
       </form>
-      <p id="status"></p>
+      <p id="statusMsg"></p>
     </div>
   </div>
 
   <script>
-    async function fetchStatus() {
+    async function updateQR() {
       try {
-        const res = await fetch("/status");
-        const data = await res.json();
-        if (data.connected) {
+        const statusRes = await fetch("/status");
+        const statusData = await statusRes.json();
+
+        if (statusData.connected) {
           document.getElementById("qr-section").classList.add("hidden");
           document.getElementById("form-section").classList.remove("hidden");
         } else {
           document.getElementById("qr-section").classList.remove("hidden");
           document.getElementById("form-section").classList.add("hidden");
+
+          const qrImg = document.getElementById("qr");
+          const qrText = document.getElementById("qrText");
+
+          // Tenta carregar o QR
+          const timestamp = new Date().getTime();
+          qrImg.src = "/qr.png?timestamp=" + timestamp;
+
+          // Se ainda não houver QR, exibe texto
+          qrImg.onerror = () => {
+            qrImg.src = "";
+            qrText.textContent = "Aguardando QR Code...";
+          };
+
+          qrImg.onload = () => {
+            qrText.textContent = "";
+          };
         }
       } catch (err) {
-        console.error("Erro ao buscar status:", err);
+        console.error("Erro ao atualizar QR", err);
       }
     }
 
-    function refreshQR() {
-      const qrImg = document.getElementById("qr");
-      qrImg.src = "/qr.png?" + Date.now(); // força atualização
-    }
-
-    // Atualiza QR a cada 39 segundos
-    refreshQR();
-    setInterval(() => { refreshQR(); fetchStatus(); }, 39000);
+    // Atualiza QR a cada 30 segundos
+    updateQR();
+    setInterval(updateQR, 30000);
 
     // Enviar mensagem
     document.getElementById("msgForm").addEventListener("submit", async (e) => {
       e.preventDefault();
-      const number = document.getElementById("number").value.trim();
-      const message = document.getElementById("message").value.trim();
-      if (!number || !message) return;
+      const number = document.getElementById("number").value;
+      const message = document.getElementById("message").value;
 
-      document.getElementById("status").textContent = "⏳ Enviando...";
       try {
         const res = await fetch("/send", {
           method: "POST",
@@ -94,9 +126,11 @@
           body: JSON.stringify({ number, message }),
         });
         const data = await res.json();
-        document.getElementById("status").textContent = data.success ? "✅ Mensagem enviada!" : "❌ Erro: " + (data.error || "desconhecido");
+        document.getElementById("statusMsg").textContent = data.success
+          ? "✅ Mensagem enviada!"
+          : "❌ Erro: " + (data.error || "desconhecido");
       } catch (err) {
-        document.getElementById("status").textContent = "❌ Erro ao enviar mensagem";
+        document.getElementById("statusMsg").textContent = "❌ Erro ao enviar mensagem";
         console.error(err);
       }
     });
