@@ -2,7 +2,7 @@ FROM node:18-slim
 
 WORKDIR /app
 
-# Instala dependências que o puppeteer/chrome precisa
+# Instala dependências do Chromium
 RUN apt-get update && apt-get install -y \
   wget \
   ca-certificates \
@@ -42,6 +42,10 @@ RUN apt-get update && apt-get install -y \
   libvulkan1 \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
+
+# Cria usuário não-root
+RUN useradd -ms /bin/bash pptruser
+USER pptruser
 
 COPY package.json ./
 RUN npm install --production
