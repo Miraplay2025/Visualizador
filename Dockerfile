@@ -1,43 +1,30 @@
-# Base Python completa para evitar problemas de pip
-FROM python:3.12-slim
+# Base image com Node.js e OpenCV
+FROM node:20-bullseye
 
-# Instalar Node.js 20 LTS e dependências do sistema
+# Instalar dependências do OpenCV
 RUN apt-get update && apt-get install -y \
-    curl \
-    build-essential \
-    libgl1 \
-    libglib2.0-0 \
-    libsm6 \
-    libxrender1 \
-    libxext6 \
-    git \
-    && apt-get clean
+    build-essential cmake git pkg-config libgtk-3-dev \
+    libavcodec-dev libavformat-dev libswscale-dev \
+    libv4l-dev libxvidcore-dev libx264-dev libjpeg-dev \
+    libpng-dev libtiff-dev gfortran openexr libatlas-base-dev \
+    python3-dev python3-numpy wget unzip && rm -rf /var/lib/apt/lists/*
 
-# Instalar Node.js LTS
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs
-
-# Diretório da app
-WORKDIR /app
+# Criar diretório da aplicação
+WORKDIR /usr/src/app
 
 # Copiar arquivos
-COPY package.json package-lock.json* ./ 
-COPY requirements.txt ./ 
-COPY server.js ./ 
-COPY ocr.py ./ 
+COPY package*.json ./
+COPY server.js ./
 COPY public ./public
 
-# Atualizar pip
-RUN python3 -m pip install --upgrade pip
-
-# Instalar dependências Node
+# Instalar dependências
 RUN npm install
 
-# Instalar dependências Python
-RUN pip install --no-cache-dir -r requirements.txt
+# Criar pasta uploads
+RUN mkdir -p uploads
 
 # Expor porta
 EXPOSE 3000
 
-# Rodar app
-CMD ["node", "server.js"]
+# Iniciar aplicação
+CMD ["npm", "start"]
