@@ -7,7 +7,7 @@ const { spawn } = require('child_process');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Criar pasta uploads
+// Pasta uploads
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
@@ -26,7 +26,6 @@ app.post('/extract-text', upload.single('image'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Nenhuma imagem enviada' });
 
   const imagePath = req.file.path;
-
   const py = spawn('python3', ['ocr.py', imagePath]);
 
   let dataString = '';
@@ -36,7 +35,7 @@ app.post('/extract-text', upload.single('image'), (req, res) => {
   py.stderr.on('data', (data) => errorString += data.toString());
 
   py.on('close', (code) => {
-    // Apaga a imagem mesmo em caso de erro
+    // Sempre apagar imagem
     if (fs.existsSync(imagePath)) fs.unlinkSync(imagePath);
 
     if (code !== 0) {
