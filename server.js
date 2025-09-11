@@ -22,7 +22,7 @@
       width: 320px;
     }
     img {
-      width: 90px;
+      width: 90px; /* largura fixa */
       height: 40vh;
       margin-bottom: 15px;
     }
@@ -107,7 +107,6 @@
         } else {
           qrImg.src = "";
           qrText.textContent = "Aguardando QR Code...";
-          // tenta novamente em 3 segundos
           setTimeout(fetchQRCode, 3000);
         }
       } catch (err) {
