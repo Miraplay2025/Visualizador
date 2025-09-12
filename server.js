@@ -6,48 +6,93 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-let client = null;
-let qrCodeBase64 = null;
-let connected = false;
+// Guardar sessões
+let sessions = {}; // { sessionName: { client, qr, connected } }
 
-// Inicia sessão
-wppconnect.create({
-  session: "render-session",
-  puppeteerOptions: {
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-extensions",
-      "--disable-gpu",
-    ],
-  },
-  autoClose: 0, // nunca fecha a página automaticamente
-  catchQR: (base64Qr) => {
-    qrCodeBase64 = base64Qr;
-    connected = false;
-    console.log("Novo QR gerado");
-  },
-  statusFind: (statusSession) => {
-    console.log("STATUS:", statusSession);
-    connected = statusSession === "inChat";
-    if (connected) console.log("✅ Conectado ao WhatsApp");
-  },
-  logQR: false,
-})
-  .then((cli) => {
-    client = cli;
-  })
-  .catch((err) => console.error("Erro ao iniciar WPPConnect:", err));
+// Criar nova sessão
+async function createSession(sessionName) {
+  if (sessions[sessionName]) {
+    console.log(`Sessão ${sessionName} já existe`);
+    return sessions[sessionName];
+  }
 
-// Endpoint para pegar QR como imagem PNG
-app.get("/qr.png", (req, res) => {
-  if (!qrCodeBase64) {
+  console.log(`🔄 Iniciando sessão: ${sessionName}`);
+  return wppconnect
+    .create({
+      session: sessionName,
+      puppeteerOptions: {
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-extensions",
+          "--disable-gpu",
+        ],
+      },
+      autoClose: 0,
+      catchQR: (base64Qr) => {
+        sessions[sessionName].qr = base64Qr;
+        sessions[sessionName].connected = false;
+        console.log(`Novo QR gerado para sessão ${sessionName}`);
+      },
+      statusFind: (statusSession) => {
+        console.log(`STATUS [${sessionName}]:`, statusSession);
+        sessions[sessionName].connected = statusSession === "inChat";
+      },
+      logQR: false,
+    })
+    .then((client) => {
+      sessions[sessionName] = { client, qr: null, connected: false };
+      return sessions[sessionName];
+    })
+    .catch((err) => console.error(`Erro ao iniciar sessão ${sessionName}:`, err));
+}
+
+// 🔹 Endpoint: Listar todas as sessões
+app.get("/sessions", (req, res) => {
+  const all = Object.keys(sessions).map((name) => ({
+    name,
+    connected: sessions[name].connected,
+  }));
+  res.json(all);
+});
+
+// 🔹 Endpoint: Criar nova sessão
+app.post("/session/:name", async (req, res) => {
+  const { name } = req.params;
+  try {
+    await createSession(name);
+    res.json({ success: true, message: `Sessão ${name} iniciada` });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao criar sessão", details: err.message });
+  }
+});
+
+// 🔹 Endpoint: Excluir sessão
+app.delete("/session/:name", async (req, res) => {
+  const { name } = req.params;
+  if (!sessions[name]) {
+    return res.status(404).json({ error: "Sessão não encontrada" });
+  }
+
+  try {
+    await sessions[name].client.close();
+    delete sessions[name];
+    res.json({ success: true, message: `Sessão ${name} excluída` });
+  } catch (err) {
+    res.status(500).json({ error: "Erro ao excluir sessão", details: err.message });
+  }
+});
+
+// 🔹 Endpoint: Pegar QR de uma sessão
+app.get("/qr/:name.png", (req, res) => {
+  const { name } = req.params;
+  if (!sessions[name] || !sessions[name].qr) {
     return res.status(404).send("QR code ainda não gerado");
   }
 
   const imgBuffer = Buffer.from(
-    qrCodeBase64.replace(/^data:image\/png;base64,/, ""),
+    sessions[name].qr.replace(/^data:image\/png;base64,/, ""),
     "base64"
   );
 
@@ -61,26 +106,34 @@ app.get("/qr.png", (req, res) => {
   res.end(imgBuffer);
 });
 
-// Endpoint para enviar mensagem
-app.post("/send", async (req, res) => {
-  try {
-    const { number, message } = req.body;
-    if (!connected)
-      return res.status(400).json({ error: "Não conectado ao WhatsApp" });
-
-    await client.sendText(number + "@c.us", message);
-    res.json({ success: true });
-  } catch (err) {
-    console.error("Erro ao enviar mensagem:", err);
-    res
-      .status(500)
-      .json({ error: "Erro ao enviar mensagem", details: err.message });
+// 🔹 Endpoint: Status de uma sessão
+app.get("/status/:name", (req, res) => {
+  const { name } = req.params;
+  if (!sessions[name]) {
+    return res.status(404).json({ error: "Sessão não encontrada" });
   }
+  res.json({ connected: sessions[name].connected });
 });
 
-// Endpoint para verificar status
-app.get("/status", (req, res) => {
-  res.json({ connected });
+// 🔹 Endpoint: Enviar mensagem por sessão
+app.post("/send/:name", async (req, res) => {
+  const { name } = req.params;
+  const { number, message } = req.body;
+
+  if (!sessions[name]) {
+    return res.status(404).json({ error: "Sessão não encontrada" });
+  }
+  if (!sessions[name].connected) {
+    return res.status(400).json({ error: "Sessão não conectada ao WhatsApp" });
+  }
+
+  try {
+    await sessions[name].client.sendText(number + "@c.us", message);
+    res.json({ success: true });
+  } catch (err) {
+    console.error(`Erro ao enviar mensagem [${name}]:`, err);
+    res.status(500).json({ error: "Erro ao enviar mensagem", details: err.message });
+  }
 });
 
 // Porta para Render
