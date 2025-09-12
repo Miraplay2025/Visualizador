@@ -8,10 +8,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Função de log controlado
+// Logs recentes limitados a 100 caracteres
+let recentLogs = "";
 function log(msg) {
   const time = new Date().toLocaleTimeString();
-  console.log(`[LOG ${time}] ${msg}`);
+  const entry = `[${time}] ${msg}\n`;
+  recentLogs += entry;
+  if (recentLogs.length > 100) {
+    recentLogs = recentLogs.slice(recentLogs.length - 100);
+  }
+  console.log(entry.trim());
 }
 
 // Pasta para salvar dados persistentes das sessões
@@ -23,9 +29,7 @@ let sessions = {}; // { sessionName: { client, qr, connected } }
 
 // 🔹 Criar nova sessão
 async function createSession(sessionName) {
-  if (sessions[sessionName]) {
-    return sessions[sessionName];
-  }
+  if (sessions[sessionName]) return sessions[sessionName];
 
   sessions[sessionName] = { client: null, qr: null, connected: false };
 
@@ -55,14 +59,15 @@ async function createSession(sessionName) {
       catchQR: (base64Qr) => {
         sessions[sessionName].qr = base64Qr;
         sessions[sessionName].connected = false;
+        log(`🔹 QR code gerado para ${sessionName}`);
       },
       statusFind: (status) => {
         sessions[sessionName].connected = status === "inChat";
 
         if (status === "inChat") {
-          client.getSessionTokenBrowser().then((data) => {
-            fs.writeFileSync(sessionFile, JSON.stringify(data, null, 2));
-          }).catch(() => {});
+          client.getSessionTokenBrowser()
+            .then((data) => fs.writeFileSync(sessionFile, JSON.stringify(data, null, 2)))
+            .catch((err) => log(`❌ Erro salvando sessão ${sessionName}: ${err.message}`));
         }
       },
       logQR: false,
@@ -71,18 +76,24 @@ async function createSession(sessionName) {
     sessions[sessionName].client = client;
     return sessions[sessionName];
   } catch (err) {
-    throw new Error(`Erro ao iniciar sessão ${sessionName}: ${err.message}`);
+    log(`❌ Erro ao iniciar sessão ${sessionName}: ${err.message}`);
+    delete sessions[sessionName]; // remove sessão somente se falhar na criação
+    throw err;
   }
 }
 
 // 🔹 Listar todas as sessões
 app.get("/sessions", (req, res) => {
-  const all = Object.keys(sessions).map((name) => ({
-    name,
-    connected: sessions[name].connected,
-  }));
-  log("📋 /sessions requisitado");
-  res.json(all);
+  try {
+    const all = Object.keys(sessions).map(name => ({
+      name,
+      connected: sessions[name].connected,
+    }));
+    res.json(all);
+  } catch (err) {
+    log(`❌ Erro ao listar sessões: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 🔹 Criar nova sessão
@@ -93,7 +104,6 @@ app.post("/session/:name", async (req, res) => {
     log(`✅ Sessão ${name} criada`);
     res.json({ success: true, message: `Sessão ${name} iniciada` });
   } catch (err) {
-    log(`❌ Erro criar sessão ${name}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -101,12 +111,10 @@ app.post("/session/:name", async (req, res) => {
 // 🔹 Excluir sessão
 app.delete("/session/:name", async (req, res) => {
   const { name } = req.params;
-  if (!sessions[name]) {
-    return res.status(404).json({ error: "Sessão não encontrada" });
-  }
+  if (!sessions[name]) return res.status(404).json({ error: "Sessão não encontrada" });
 
   try {
-    await sessions[name].client.close();
+    await sessions[name].client?.close();
     delete sessions[name];
 
     const sessionFile = path.join(SESSION_FOLDER, `${name}.json`);
@@ -115,7 +123,7 @@ app.delete("/session/:name", async (req, res) => {
     log(`🗑️ Sessão ${name} excluída`);
     res.json({ success: true, message: `Sessão ${name} excluída` });
   } catch (err) {
-    log(`❌ Erro excluir sessão ${name}`);
+    log(`❌ Erro ao excluir sessão ${name}: ${err.message}`);
     res.status(500).json({ error: err.message });
   }
 });
@@ -123,29 +131,29 @@ app.delete("/session/:name", async (req, res) => {
 // 🔹 QR Code da sessão
 app.get("/qr/:name.png", (req, res) => {
   const { name } = req.params;
-  if (!sessions[name] || !sessions[name].qr) {
-    return res.status(404).send("QR code ainda não gerado");
-  }
+  if (!sessions[name] || !sessions[name].qr) return res.status(404).send("QR code ainda não gerado");
 
-  const imgBuffer = Buffer.from(sessions[name].qr.replace(/^data:image\/png;base64,/, ""), "base64");
-  res.writeHead(200, {
-    "Content-Type": "image/png",
-    "Content-Length": imgBuffer.length,
-    "Cache-Control": "no-cache, no-store, must-revalidate",
-    Pragma: "no-cache",
-    Expires: "0",
-  });
-  res.end(imgBuffer);
-  log(`📷 QR enviado (${name})`);
+  try {
+    const imgBuffer = Buffer.from(sessions[name].qr.replace(/^data:image\/png;base64,/, ""), "base64");
+    res.writeHead(200, {
+      "Content-Type": "image/png",
+      "Content-Length": imgBuffer.length,
+      "Cache-Control": "no-cache, no-store, must-revalidate",
+      Pragma: "no-cache",
+      Expires: "0",
+    });
+    res.end(imgBuffer);
+    log(`📷 QR enviado (${name})`);
+  } catch (err) {
+    log(`❌ Erro enviando QR ${name}: ${err.message}`);
+    res.status(500).send(err.message);
+  }
 });
 
 // 🔹 Status da sessão
 app.get("/status/:name", (req, res) => {
   const { name } = req.params;
-  if (!sessions[name]) {
-    return res.status(404).json({ error: "Sessão não encontrada" });
-  }
-  log(`ℹ️ Status requisitado (${name})`);
+  if (!sessions[name]) return res.status(404).json({ error: "Sessão não encontrada" });
   res.json({ connected: sessions[name].connected });
 });
 
@@ -153,13 +161,15 @@ app.get("/status/:name", (req, res) => {
 app.get("/data/:name", (req, res) => {
   const { name } = req.params;
   const sessionFile = path.join(SESSION_FOLDER, `${name}.json`);
-  if (!fs.existsSync(sessionFile)) {
-    return res.status(404).json({ error: "Dados não encontrados" });
-  }
+  if (!fs.existsSync(sessionFile)) return res.status(404).json({ error: "Dados não encontrados" });
 
-  const data = JSON.parse(fs.readFileSync(sessionFile, "utf-8"));
-  log(`📂 Dados enviados (${name})`);
-  res.json(data);
+  try {
+    const data = JSON.parse(fs.readFileSync(sessionFile, "utf-8"));
+    res.json(data);
+  } catch (err) {
+    log(`❌ Erro ao ler dados ${name}: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 🔹 Enviar mensagem
@@ -167,23 +177,25 @@ app.post("/send/:name", async (req, res) => {
   const { name } = req.params;
   const { number, message } = req.body;
 
-  if (!sessions[name]) {
-    return res.status(404).json({ error: "Sessão não encontrada" });
-  }
-  if (!sessions[name].connected) {
-    return res.status(400).json({ error: "Sessão não conectada" });
-  }
+  if (!sessions[name]) return res.status(404).json({ error: "Sessão não encontrada" });
+  if (!sessions[name].connected) return res.status(400).json({ error: "Sessão não conectada" });
 
   try {
     await sessions[name].client.sendText(number + "@c.us", message);
     log(`✉️ Mensagem enviada (${name}) -> ${number}`);
     res.json({ success: true });
   } catch (err) {
-    log(`❌ Erro envio mensagem (${name})`);
+    log(`❌ Erro envio mensagem (${name}): ${err.message}`);
     res.status(500).json({ error: err.message });
   }
+});
+
+// 🔹 Endpoint para ver logs recentes (apenas 100 caracteres)
+app.get("/logs", (req, res) => {
+  res.send(recentLogs);
 });
 
 // Porta para Render
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => log(`🚀 Servidor rodando na porta ${PORT}`));
+        
