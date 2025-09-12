@@ -18,7 +18,7 @@ function log(msg) {
 const SESSION_FOLDER = path.join(__dirname, "conectados");
 if (!fs.existsSync(SESSION_FOLDER)) fs.mkdirSync(SESSION_FOLDER);
 
-// Sessões em memória (apenas estado atual)
+// Sessões em memória (estado atual)
 let sessions = {}; // { sessionName: { client, qr, connected } }
 
 // 🔹 Criar nova sessão
@@ -40,12 +40,15 @@ async function createSession(sessionName) {
       session: sessionName,
       sessionData,
       puppeteerOptions: {
+        headless: true,
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
           "--disable-extensions",
           "--disable-gpu",
+          "--single-process",
+          "--disable-background-timer-throttling",
         ],
       },
       autoClose: 0,
