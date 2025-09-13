@@ -34,15 +34,14 @@ app.post("/session/:name", async (req, res) => {
 
   try {
     const sessionQRPath = path.join(SESSION_FOLDER, name + ".png");
-    const sessionDataDir = path.join("/tmp", `wppconnect-${name}`); // diretório temporário por sessão
+    const sessionDataDir = path.join("/tmp", `wppconnect-${name}`);
 
-    // Garante que o diretório exista
     if (!fs.existsSync(sessionDataDir)) fs.mkdirSync(sessionDataDir, { recursive: true });
 
     const client = await wppconnect.create({
       session: name,
       catchQR: (qr, asciiQR, attempt) => {
-        // Excluir QR antigo se existir
+        // Se houver QR antigo, apagar
         if (sessions[name] && sessions[name].qr && fs.existsSync(sessions[name].qr)) {
           fs.unlinkSync(sessions[name].qr);
         }
@@ -51,7 +50,8 @@ app.post("/session/:name", async (req, res) => {
         if (!sessions[name]) sessions[name] = {};
         sessions[name].qr = sessionQRPath;
         sessions[name].qrTimestamp = new Date().getTime();
-        console.log(`[${name}] QR code da sessão gerado (tentativa ${attempt})`);
+
+        console.log(`[${name}] QR code gerado (tentativa ${attempt})`);
       },
       statusFind: (statusSession) => {
         console.log(`[${name}] Status da sessão: ${statusSession}`);
@@ -61,7 +61,7 @@ app.post("/session/:name", async (req, res) => {
           sessions[name].connected = true;
           sessions[name].sessionData = client.getSessionTokenBrowser();
 
-          // Salvar dados da sessão em JSON
+          // Salvar JSON persistente
           const jsonPath = path.join(SESSION_FOLDER, name + ".json");
           fs.writeFileSync(
             jsonPath,
@@ -73,15 +73,16 @@ app.post("/session/:name", async (req, res) => {
             }, null, 2)
           );
 
-          // Remover QR code após sucesso
+          // Apagar QR após conectado
           if (sessions[name].qr && fs.existsSync(sessions[name].qr)) {
             fs.unlinkSync(sessions[name].qr);
             sessions[name].qr = null;
           }
 
-          console.log(`[${name}] Sessão conectada e dados salvos em JSON`);
+          console.log(`[${name}] Sessão conectada e dados salvos`);
         } else if (statusSession === "qrReadFail") {
-          console.log(`[${name}] QR code expirou ou inválido. Novo QR será gerado.`);
+          console.log(`[${name}] QR expirou, gerando novo QR...`);
+          // O próximo catchQR será chamado automaticamente pelo WPPConnect
         }
       },
       puppeteerOptions: {
@@ -94,14 +95,20 @@ app.post("/session/:name", async (req, res) => {
 
     sessions[name] = {
       client,
-      qr: null,
+      qr: sessionQRPath,
       connected: false,
       sessionData: null,
-      qrTimestamp: null,
+      qrTimestamp: new Date().getTime(),
     };
 
-    res.json({ success: true, name });
-    console.log(`[${name}] Sessão criada com sucesso`);
+    // Retorna imediatamente o QR code atual (se existir)
+    let qrBuffer = fs.existsSync(sessionQRPath) ? fs.readFileSync(sessionQRPath) : null;
+    res.setHeader("Content-Type", "image/png");
+    if (qrBuffer) {
+      return res.send(qrBuffer);
+    } else {
+      return res.json({ success: true, name, message: "Sessão criada, QR ainda não gerado" });
+    }
 
   } catch (err) {
     console.error(`[${name}] Erro ao criar sessão:`, err.message);
@@ -145,7 +152,6 @@ app.get("/sessions", (req, res) => {
     qr: sessions[name].qr || null
   }));
 
-  list.forEach(sess => console.log(`Sessão listada: ${sess.name}, conectada: ${sess.connected}`));
   res.json({ success: true, sessions: list });
 });
 
@@ -154,14 +160,11 @@ app.get("/qr/:name.png", (req, res) => {
   const { name } = req.params;
   logRequest("/qr/:name.png (GET)", `Solicitação do QR code da sessão "${name}"`);
 
-  if (!sessions[name] || !sessions[name].qr) {
-    return res.status(404).json({ success: false, error: "QR não encontrado" });
-  }
+  if (!sessions[name]) return res.status(404).json({ success: false, error: "Sessão não encontrada" });
 
   const qrFile = sessions[name].qr;
-  if (!fs.existsSync(qrFile)) return res.status(404).json({ success: false, error: "QR não encontrado" });
+  if (!qrFile || !fs.existsSync(qrFile)) return res.status(404).json({ success: false, error: "QR não encontrado" });
 
-  console.log(`QR code da sessão "${name}" enviado`);
   res.sendFile(qrFile);
 });
 
