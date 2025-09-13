@@ -1,188 +1,188 @@
+// server.js
 const express = require("express");
 const cors = require("cors");
-const wppconnect = require("@wppconnect-team/wppconnect");
 const fs = require("fs");
 const path = require("path");
-const puppeteer = require("puppeteer-core"); // usar o Chromium do Puppeteer
+const wppconnect = require("@wppconnect-team/wppconnect");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+app.use(express.static("conectados")); // serve QR codes e arquivos estáticos
 
-// Função de log controlado (mantém últimos 100 caracteres)
-let lastLogs = "";
-function log(msg) {
-  const time = new Date().toLocaleTimeString();
-  lastLogs = (lastLogs + `[${time}] ${msg}\n`).slice(-100);
-  console.log(`[LOG ${time}] ${msg}`);
-}
+const PORT = 10000;
 
 // Pasta persistente para sessões
 const SESSION_FOLDER = path.join(__dirname, "conectados");
 if (!fs.existsSync(SESSION_FOLDER)) fs.mkdirSync(SESSION_FOLDER);
 
 // Sessões em memória
-let sessions = {}; // { sessionName: { client, qr, connected, qrTimestamp } }
+let sessions = {}; // { sessionName: { client, qr, connected, sessionData, qrTimestamp } }
 
-// Criar sessão
-async function createSession(sessionName) {
-  if (sessions[sessionName]) {
-    return sessions[sessionName];
-  }
-
-  sessions[sessionName] = { client: null, qr: null, connected: false, qrTimestamp: 0 };
-  const sessionFile = path.join(SESSION_FOLDER, `${sessionName}.json`);
-  let sessionData = null;
-
-  if (fs.existsSync(sessionFile)) {
-    sessionData = JSON.parse(fs.readFileSync(sessionFile, "utf-8"));
-  }
-
-  try {
-    const client = await wppconnect.create({
-      session: sessionName,
-      sessionData,
-      puppeteerOptions: {
-        headless: true,
-        executablePath: puppeteer.executablePath(), // usar Chromium embutido
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-extensions",
-          "--disable-gpu",
-          "--single-process",
-          "--disable-background-timer-throttling",
-        ],
-      },
-      autoClose: 0,
-      catchQR: (base64Qr) => {
-        // Garante que só envia novo QR se o anterior já expirou
-        const now = Date.now();
-        if (!sessions[sessionName].qr || now - sessions[sessionName].qrTimestamp > 25000) {
-          sessions[sessionName].qr = base64Qr;
-          sessions[sessionName].qrTimestamp = now;
-          sessions[sessionName].connected = false;
-          log(`QR atualizado (${sessionName})`);
-        }
-      },
-      statusFind: (status) => {
-        sessions[sessionName].connected = status === "inChat";
-
-        if (status === "inChat") {
-          client.getSessionTokenBrowser().then((data) => {
-            fs.writeFileSync(sessionFile, JSON.stringify(data, null, 2));
-          }).catch(() => {});
-        }
-      },
-      logQR: false,
-    });
-
-    sessions[sessionName].client = client;
-    return sessions[sessionName];
-  } catch (err) {
-    throw new Error(`Erro ao iniciar sessão ${sessionName}: ${err.message}`);
-  }
+// --------------------- FUNÇÃO AUXILIAR ---------------------
+function logRequest(endpoint, info) {
+  console.log(`[${new Date().toISOString()}] ${endpoint}:`, info);
 }
 
-// Listar sessões
+// --------------------- Criar sessão ---------------------
+app.post("/session/:name", async (req, res) => {
+  const { name } = req.params;
+  logRequest("/session/:name (POST)", `Solicitação de criação da sessão ${name}`);
+
+  if (!name) return res.json({ success: false, error: "Nome inválido" });
+  if (sessions[name]) return res.json({ success: false, error: "Sessão já existe" });
+
+  try {
+    const sessionPath = path.join(SESSION_FOLDER, name + ".png");
+
+    const client = await wppconnect.create({
+      session: name,
+      catchQR: (qr, asciiQR, attempt, urlCode) => {
+        // Excluir QR antigo se existir
+        if (sessions[name] && sessions[name].qr && fs.existsSync(sessions[name].qr)) {
+          fs.unlinkSync(sessions[name].qr);
+        }
+        fs.writeFileSync(sessionPath, Buffer.from(qr, "base64"));
+        sessions[name].qr = sessionPath;
+        sessions[name].qrTimestamp = new Date().getTime();
+        console.log(`[${name}] Novo QR code gerado (tentativa ${attempt})`);
+      },
+      statusFind: (statusSession, session) => {
+        console.log(`[${name}] Status da sessão: ${statusSession}`);
+        if (statusSession === "isLogged") {
+          sessions[name].connected = true;
+          sessions[name].sessionData = client.getSessionTokenBrowser();
+
+          // Salvar dados da sessão em JSON
+          const jsonPath = path.join(SESSION_FOLDER, name + ".json");
+          fs.writeFileSync(jsonPath, JSON.stringify({
+            name,
+            connected: true,
+            sessionData: sessions[name].sessionData,
+            timestamp: new Date().toISOString()
+          }, null, 2));
+
+          // Remover QR code após sucesso
+          if (sessions[name].qr && fs.existsSync(sessions[name].qr)) {
+            fs.unlinkSync(sessions[name].qr);
+            sessions[name].qr = null;
+          }
+
+          console.log(`[${name}] Sessão conectada e dados salvos em JSON`);
+        } else if (statusSession === "qrReadFail") {
+          console.log(`[${name}] QR code expirou ou inválido. Novo QR será gerado.`);
+        }
+      },
+      puppeteerOptions: {
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      },
+      autoClose: 0, // nunca fecha a sessão
+    });
+
+    sessions[name] = {
+      client,
+      qr: null,
+      connected: false,
+      sessionData: null,
+      qrTimestamp: null,
+    };
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.json({ success: false, error: err.message });
+  }
+});
+
+// --------------------- Excluir sessão ---------------------
+app.delete("/session/:name", async (req, res) => {
+  const { name } = req.params;
+  logRequest("/session/:name (DELETE)", `Solicitação de exclusão da sessão ${name}`);
+
+  if (!sessions[name]) return res.json({ success: false, error: "Sessão não encontrada" });
+
+  try {
+    await sessions[name].client.logout();
+    delete sessions[name];
+
+    // Remove QR e JSON persistente
+    const qrFile = path.join(SESSION_FOLDER, name + ".png");
+    const jsonFile = path.join(SESSION_FOLDER, name + ".json");
+    if (fs.existsSync(qrFile)) fs.unlinkSync(qrFile);
+    if (fs.existsSync(jsonFile)) fs.unlinkSync(jsonFile);
+
+    res.json({ success: true });
+    console.log(`[${name}] Sessão excluída`);
+  } catch (err) {
+    console.error(err);
+    res.json({ success: false, error: err.message });
+  }
+});
+
+// --------------------- Listar sessões ---------------------
 app.get("/sessions", (req, res) => {
-  const all = Object.keys(sessions).map((name) => ({
+  logRequest("/sessions (GET)", "Listando todas as sessões");
+  const list = Object.keys(sessions).map(name => ({
     name,
     connected: sessions[name].connected,
   }));
-  res.json(all);
+  res.json(list);
 });
 
-// Criar sessão
-app.post("/session/:name", async (req, res) => {
-  const { name } = req.params;
-  try {
-    await createSession(name);
-    res.json({ success: true, message: `Sessão ${name} iniciada` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Excluir sessão
-app.delete("/session/:name", async (req, res) => {
-  const { name } = req.params;
-  if (!sessions[name]) {
-    return res.status(404).json({ error: "Sessão não encontrada" });
-  }
-
-  try {
-    await sessions[name].client.close();
-    delete sessions[name];
-    const sessionFile = path.join(SESSION_FOLDER, `${name}.json`);
-    if (fs.existsSync(sessionFile)) fs.unlinkSync(sessionFile);
-    res.json({ success: true, message: `Sessão ${name} excluída` });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// QR Code
+// --------------------- Servir QR code ---------------------
 app.get("/qr/:name.png", (req, res) => {
   const { name } = req.params;
-  if (!sessions[name] || !sessions[name].qr) {
-    return res.status(404).send("QR code ainda não gerado ou já expirado");
+  logRequest("/qr/:name.png (GET)", `Solicitação do QR code da sessão ${name}`);
+
+  if (!sessions[name] || !sessions[name].qr) return res.status(404).send("QR não encontrado");
+
+  const qrFile = sessions[name].qr;
+  if (!fs.existsSync(qrFile)) return res.status(404).send("QR não encontrado");
+
+  res.sendFile(qrFile);
+});
+
+// --------------------- Buscar dados da sessão conectada ---------------------
+app.get("/sessionData/:name", (req, res) => {
+  const { name } = req.params;
+  logRequest("/sessionData/:name (GET)", `Solicitação dos dados da sessão ${name}`);
+
+  if (!sessions[name] || !sessions[name].connected) {
+    return res.json({ success: false, error: "Sessão não conectada" });
   }
-  const imgBuffer = Buffer.from(sessions[name].qr.replace(/^data:image\/png;base64,/, ""), "base64");
-  res.writeHead(200, {
-    "Content-Type": "image/png",
-    "Content-Length": imgBuffer.length,
-    "Cache-Control": "no-cache, no-store, must-revalidate",
-    Pragma: "no-cache",
-    Expires: "0",
+
+  res.json({
+    success: true,
+    name,
+    sessionData: sessions[name].sessionData,
   });
-  res.end(imgBuffer);
 });
 
-// Status da sessão
-app.get("/status/:name", (req, res) => {
+// --------------------- Enviar mensagem ---------------------
+app.post("/sendMessage/:name", async (req, res) => {
   const { name } = req.params;
-  if (!sessions[name]) {
-    return res.status(404).json({ error: "Sessão não encontrada" });
-  }
-  res.json({ connected: sessions[name].connected });
-});
+  const { to, message } = req.body;
 
-// Dados persistentes
-app.get("/data/:name", (req, res) => {
-  const { name } = req.params;
-  const sessionFile = path.join(SESSION_FOLDER, `${name}.json`);
-  if (!fs.existsSync(sessionFile)) {
-    return res.status(404).json({ error: "Dados não encontrados" });
-  }
-  const data = JSON.parse(fs.readFileSync(sessionFile, "utf-8"));
-  res.json(data);
-});
+  logRequest("/sendMessage/:name (POST)", `Enviar mensagem via sessão ${name} para ${to}`);
 
-// Enviar mensagem
-app.post("/send/:name", async (req, res) => {
-  const { name } = req.params;
-  const { number, message } = req.body;
-  if (!sessions[name]) {
-    return res.status(404).json({ error: "Sessão não encontrada" });
+  if (!sessions[name] || !sessions[name].connected) {
+    return res.json({ success: false, error: "Sessão não conectada" });
   }
-  if (!sessions[name].connected) {
-    return res.status(400).json({ error: "Sessão não conectada" });
+  if (!to || !message) {
+    return res.json({ success: false, error: "Campos 'to' e 'message' são obrigatórios" });
   }
+
   try {
-    await sessions[name].client.sendText(number + "@c.us", message);
-    res.json({ success: true });
+    await sessions[name].client.sendText(to, message);
+    res.json({ success: true, to, message });
+    console.log(`[${name}] Mensagem enviada para ${to}: ${message}`);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.json({ success: false, error: err.message });
   }
 });
 
-// Logs recentes
-app.get("/logs", (req, res) => {
-  res.type("text/plain").send(lastLogs);
+// --------------------- Inicialização ---------------------
+app.listen(PORT, () => {
+  console.log(`Servidor rodando em http://localhost:${PORT}`);
 });
-
-// Porta
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => log(`Servidor rodando na porta ${PORT}`));
