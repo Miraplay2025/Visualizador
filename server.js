@@ -33,23 +33,27 @@ app.post("/session/:name", async (req, res) => {
   if (sessions[name]) return res.json({ success: false, error: "Sessão já existe" });
 
   try {
-    const sessionPath = path.join(SESSION_FOLDER, name + ".png");
+    const sessionQRPath = path.join(SESSION_FOLDER, name + ".png");
+    const sessionDataDir = path.join("/tmp", `wppconnect-${name}`); // diretório temporário por sessão
+
+    // Garante que o diretório exista
+    if (!fs.existsSync(sessionDataDir)) fs.mkdirSync(sessionDataDir, { recursive: true });
 
     const client = await wppconnect.create({
       session: name,
-      catchQR: (qr, asciiQR, attempt, urlCode) => {
+      catchQR: (qr, asciiQR, attempt) => {
         // Excluir QR antigo se existir
         if (sessions[name] && sessions[name].qr && fs.existsSync(sessions[name].qr)) {
           fs.unlinkSync(sessions[name].qr);
         }
 
-        fs.writeFileSync(sessionPath, Buffer.from(qr, "base64"));
+        fs.writeFileSync(sessionQRPath, Buffer.from(qr, "base64"));
         if (!sessions[name]) sessions[name] = {};
-        sessions[name].qr = sessionPath;
+        sessions[name].qr = sessionQRPath;
         sessions[name].qrTimestamp = new Date().getTime();
         console.log(`[${name}] QR code da sessão gerado (tentativa ${attempt})`);
       },
-      statusFind: (statusSession, session) => {
+      statusFind: (statusSession) => {
         console.log(`[${name}] Status da sessão: ${statusSession}`);
         if (!sessions[name]) sessions[name] = {};
 
@@ -59,12 +63,15 @@ app.post("/session/:name", async (req, res) => {
 
           // Salvar dados da sessão em JSON
           const jsonPath = path.join(SESSION_FOLDER, name + ".json");
-          fs.writeFileSync(jsonPath, JSON.stringify({
-            name,
-            connected: true,
-            sessionData: sessions[name].sessionData,
-            timestamp: new Date().toISOString()
-          }, null, 2));
+          fs.writeFileSync(
+            jsonPath,
+            JSON.stringify({
+              name,
+              connected: true,
+              sessionData: sessions[name].sessionData,
+              timestamp: new Date().toISOString(),
+            }, null, 2)
+          );
 
           // Remover QR code após sucesso
           if (sessions[name].qr && fs.existsSync(sessions[name].qr)) {
@@ -78,9 +85,11 @@ app.post("/session/:name", async (req, res) => {
         }
       },
       puppeteerOptions: {
+        headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        userDataDir: sessionDataDir,
       },
-      autoClose: 0, // nunca fecha a sessão
+      autoClose: 0,
     });
 
     sessions[name] = {
