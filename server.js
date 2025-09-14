@@ -136,7 +136,7 @@ app.post("/session/:name", async (req, res) => {
     await runWithLock(name, async () => {
       await createSession(name);
     });
-    res.json({ success: true, message: `Sessão "${name}" criada` });
+    res.json({ success: true, message: `Sessão "${name}" criada`, session: name });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -146,7 +146,10 @@ app.post("/session/:name", async (req, res) => {
 app.get("/sessions", (req, res) => {
   const all = Array.from(sessions.keys()).map((name) => {
     const s = sessions.get(name);
-    return { name, connected: s.connected };
+    return {
+      name,
+      status: s.connected ? "conectado" : "não conectado",
+    };
   });
   res.json({ success: true, sessions: all });
 });
@@ -192,7 +195,7 @@ app.delete("/session/:name", (req, res) => {
     sessions.delete(name);
     sessionLocks.delete(name);
 
-    res.json({ success: true, message: `Sessão "${name}" excluída` });
+    res.json({ success: true, message: `Sessão "${name}" excluída`, session: name });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
