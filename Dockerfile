@@ -45,11 +45,13 @@ RUN apt-get update && apt-get install -y \
 
 COPY package.json ./
 
-# Instala dependências + força download do Chrome/Chromium do Puppeteer
+# Instala dependências + força download do Chrome/Chromium do Puppeteer + QRCode
 RUN npm install --production && \
+    npm install qrcode && \
     npx puppeteer browsers install chrome
 
 COPY . .
 
 EXPOSE 10000
+
 CMD ["npm", "start"]
