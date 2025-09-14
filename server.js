@@ -161,8 +161,9 @@ app.get("/qr/:name.png", async (req, res) => {
 
     const sessionQRPath = path.join(SESSION_FOLDER, name + ".png");
 
+    // Criar instância temporária somente para gerar QR
     await wppconnect.create({
-      session: name,
+      session: `temp-${name}-${Date.now()}`,
       catchQR: (qr) => {
         fs.writeFileSync(sessionQRPath, Buffer.from(qr, "base64"));
         if (!sessions[name]) sessions[name] = {};
@@ -170,7 +171,7 @@ app.get("/qr/:name.png", async (req, res) => {
         sessions[name].qrTimestamp = Date.now();
       },
       puppeteerOptions: { headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"], userDataDir: sessionDir },
-      autoClose: 0,
+      autoClose: true, // fecha automaticamente para evitar conflito
     });
 
     if (!fs.existsSync(sessionQRPath)) throw new Error("QR não disponível");
@@ -224,11 +225,9 @@ app.delete("/delete/session/:name", async (req, res) => {
     const sessionDir = path.join(SESSION_FOLDER, name);
     if (!fs.existsSync(sessionDir)) throw new Error("Sessão não encontrada");
 
-    // Logout e remover da memória
     if (sessions[name]?.client) await sessions[name].client.logout();
     delete sessions[name];
 
-    // Remover arquivos
     const qrFile = path.join(SESSION_FOLDER, name + ".png");
     const jsonFile = path.join(SESSION_FOLDER, name + ".json");
 
