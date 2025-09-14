@@ -26,16 +26,18 @@ let sessions = {};
 // ----------------- RESTAURAR SESSÕES -----------------
 function restoreSessions() {
   try {
-    const files = fs.readdirSync(SESSION_FOLDER).filter(f => f.endsWith(".json"));
-    for (const file of files) {
-      const data = JSON.parse(fs.readFileSync(path.join(SESSION_FOLDER, file)));
-      const name = data.name;
-      sessions[name] = {
-        client: null,
-        qrPath: null,
-        connected: data.connected || false,
-        sessionData: data.sessionData || null,
-      };
+    const dirs = fs.readdirSync(SESSION_FOLDER, { withFileTypes: true }).filter(d => d.isDirectory());
+    for (const dir of dirs) {
+      const name = dir.name;
+      const jsonFile = path.join(SESSION_FOLDER, name + ".json");
+      let connected = false;
+      let sessionData = null;
+      if (fs.existsSync(jsonFile)) {
+        const data = JSON.parse(fs.readFileSync(jsonFile));
+        connected = data.connected || false;
+        sessionData = data.sessionData || null;
+      }
+      sessions[name] = { client: null, qrPath: null, connected, sessionData };
       logRequest("restoreSessions", `Sessão "${name}" restaurada`);
     }
   } catch (err) {
@@ -68,7 +70,7 @@ app.post("/session/:name", async (req, res) => {
 
     const client = await wppconnect.create({
       session: name,
-      catchQR: () => {}, // QR gerado apenas sob demanda
+      catchQR: () => {}, // QR será gerado apenas sob demanda
       statusFind: async (statusSession) => {
         if (statusSession === "isLogged") {
           sessions[name].connected = true;
@@ -89,7 +91,7 @@ app.post("/session/:name", async (req, res) => {
             logRequest(endpoint, `Erro salvando token da sessão "${name}": ${err.message}`);
           }
         }
-        // Atualização do QR code apenas se WppConnect informar expiração
+        // Se WppConnect indicar QR expirado, limpa QR antigo
         if (statusSession === "qrCodeUnknown" || statusSession === "qrCodeExpired") {
           sessions[name].qrPath = null;
         }
@@ -124,22 +126,10 @@ app.get("/sessions", (req, res) => {
   logRequest(endpoint, "Solicitado listar sessões");
 
   try {
-    let list = [];
-    const items = fs.readdirSync(SESSION_FOLDER, { withFileTypes: true });
-    for (const item of items) {
-      if (item.isDirectory()) {
-        const sessionName = item.name;
-        const jsonFile = path.join(SESSION_FOLDER, sessionName + ".json");
-        let connected = false;
-        if (fs.existsSync(jsonFile)) {
-          try {
-            const data = JSON.parse(fs.readFileSync(jsonFile));
-            connected = data.connected || false;
-          } catch {}
-        }
-        list.push({ name: sessionName, connected });
-      }
-    }
+    const list = Object.keys(sessions).map(name => ({
+      name,
+      connected: sessions[name].connected,
+    }));
 
     const msg = list.length ? `Total de sessões: ${list.length}` : "Nenhuma sessão cadastrada";
     res.json({ success: true, sessions: list, message: msg });
@@ -158,17 +148,16 @@ app.get("/qr/:name.png", async (req, res) => {
   logRequest(endpoint, `Solicitado QR da sessão "${name}"`);
 
   try {
+    if (!sessions[name]) throw new Error("Sessão não encontrada");
     const sessionDir = path.join(SESSION_FOLDER, name);
-    if (!fs.existsSync(sessionDir)) throw new Error("Sessão não encontrada");
+    const sessionQRPath = path.join(sessionDir, name + ".png");
 
-    const sessionQRPath = path.join(SESSION_FOLDER, name + ".png");
-
+    // Gera QR code via WppConnect
     const client = await wppconnect.create({
       session: name,
       catchQR: (qr) => {
         if (fs.existsSync(sessionQRPath)) fs.unlinkSync(sessionQRPath);
         fs.writeFileSync(sessionQRPath, Buffer.from(qr, "base64"));
-        if (!sessions[name]) sessions[name] = {};
         sessions[name].qrPath = sessionQRPath;
       },
       statusFind: () => {},
@@ -180,11 +169,11 @@ app.get("/qr/:name.png", async (req, res) => {
       autoClose: 0,
     });
 
-    // Aguarda QR ser gerado pelo WppConnect
+    // Aguarda QR ser gerado
     const waitForQR = () => new Promise((resolve, reject) => {
-      const check = setInterval(() => {
+      const interval = setInterval(() => {
         if (sessions[name]?.qrPath && fs.existsSync(sessions[name].qrPath)) {
-          clearInterval(check);
+          clearInterval(interval);
           resolve();
         }
       }, 300);
@@ -208,21 +197,17 @@ app.get("/sessionData/:name", (req, res) => {
   logRequest(endpoint, `Solicitado dados da sessão "${name}"`);
 
   try {
-    const sessionDir = path.join(SESSION_FOLDER, name);
-    if (!fs.existsSync(sessionDir)) throw new Error("Sessão não encontrada");
+    if (!sessions[name]) throw new Error("Sessão não encontrada");
 
     const jsonFile = path.join(SESSION_FOLDER, name + ".json");
-    let connected = false;
-    let sessionData = null;
+    let connected = sessions[name].connected;
+    let sessionData = sessions[name].sessionData;
+
     if (fs.existsSync(jsonFile)) {
       const data = JSON.parse(fs.readFileSync(jsonFile));
-      connected = data.connected || false;
-      sessionData = data.sessionData || null;
+      connected = data.connected || connected;
+      sessionData = data.sessionData || sessionData;
     }
-
-    if (!sessions[name]) sessions[name] = {};
-    sessions[name].connected = connected;
-    sessions[name].sessionData = sessionData;
 
     res.json({ success: true, name, connected, sessionData });
     logRequest(endpoint, `Dados da sessão "${name}" retornados com sucesso`);
@@ -239,14 +224,14 @@ app.delete("/delete/session/:name", async (req, res) => {
   logRequest(endpoint, `Solicitado excluir sessão "${name}"`);
 
   try {
-    const sessionDir = path.join(SESSION_FOLDER, name);
-    if (!fs.existsSync(sessionDir)) throw new Error("Sessão não encontrada");
+    if (!sessions[name]) throw new Error("Sessão não encontrada");
 
     if (sessions[name]?.client) await sessions[name].client.logout();
     delete sessions[name];
 
-    const qrFile = path.join(SESSION_FOLDER, name + ".png");
-    const jsonFile = path.join(SESSION_FOLDER, name + ".json");
+    const sessionDir = path.join(SESSION_FOLDER, name);
+    const qrFile = path.join(sessionDir, name + ".png");
+    const jsonFile = path.join(sessionDir, name + ".json");
 
     if (fs.existsSync(qrFile)) fs.unlinkSync(qrFile);
     if (fs.existsSync(jsonFile)) fs.unlinkSync(jsonFile);
