@@ -126,10 +126,12 @@ app.get("/sessions", (req, res) => {
   logRequest(endpoint, "Solicitado listar sessões");
 
   try {
-    const list = Object.keys(sessions).map(name => ({
-      name,
-      connected: sessions[name].connected,
-    }));
+    const dirs = fs.readdirSync(SESSION_FOLDER, { withFileTypes: true }).filter(d => d.isDirectory());
+    const list = dirs.map(d => {
+      const name = d.name;
+      const session = sessions[name] || { connected: false };
+      return { name, connected: session.connected };
+    });
 
     const msg = list.length ? `Total de sessões: ${list.length}` : "Nenhuma sessão cadastrada";
     res.json({ success: true, sessions: list, message: msg });
@@ -148,11 +150,11 @@ app.get("/qr/:name.png", async (req, res) => {
   logRequest(endpoint, `Solicitado QR da sessão "${name}"`);
 
   try {
-    if (!sessions[name]) throw new Error("Sessão não encontrada");
     const sessionDir = path.join(SESSION_FOLDER, name);
+    if (!fs.existsSync(sessionDir)) throw new Error("Sessão não encontrada");
+
     const sessionQRPath = path.join(sessionDir, name + ".png");
 
-    // Gera QR code via WppConnect
     const client = await wppconnect.create({
       session: name,
       catchQR: (qr) => {
@@ -160,7 +162,11 @@ app.get("/qr/:name.png", async (req, res) => {
         fs.writeFileSync(sessionQRPath, Buffer.from(qr, "base64"));
         sessions[name].qrPath = sessionQRPath;
       },
-      statusFind: () => {},
+      statusFind: (status) => {
+        if (status === "qrCodeExpired") {
+          sessions[name].qrPath = null; // QR antigo expirado
+        }
+      },
       puppeteerOptions: {
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
@@ -169,7 +175,7 @@ app.get("/qr/:name.png", async (req, res) => {
       autoClose: 0,
     });
 
-    // Aguarda QR ser gerado
+    // Aguardar QR ser gerado
     const waitForQR = () => new Promise((resolve, reject) => {
       const interval = setInterval(() => {
         if (sessions[name]?.qrPath && fs.existsSync(sessions[name].qrPath)) {
@@ -197,11 +203,12 @@ app.get("/sessionData/:name", (req, res) => {
   logRequest(endpoint, `Solicitado dados da sessão "${name}"`);
 
   try {
-    if (!sessions[name]) throw new Error("Sessão não encontrada");
+    const sessionDir = path.join(SESSION_FOLDER, name);
+    if (!fs.existsSync(sessionDir)) throw new Error("Sessão não encontrada");
 
-    const jsonFile = path.join(SESSION_FOLDER, name + ".json");
-    let connected = sessions[name].connected;
-    let sessionData = sessions[name].sessionData;
+    const jsonFile = path.join(sessionDir, name + ".json");
+    let connected = sessions[name]?.connected || false;
+    let sessionData = sessions[name]?.sessionData || null;
 
     if (fs.existsSync(jsonFile)) {
       const data = JSON.parse(fs.readFileSync(jsonFile));
@@ -250,4 +257,3 @@ app.delete("/delete/session/:name", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🔥 Servidor rodando na porta ${PORT}`);
 });
-
