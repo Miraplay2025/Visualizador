@@ -1,3 +1,4 @@
+// server.js
 const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
@@ -35,19 +36,17 @@ async function createSession(name) {
   sessions[name] = {
     client: null,
     connected: false,
-    qrPath: null,      // caminho do QR code salvo
-    qrValid: false,    // QR ainda válido
+    qrPath: null,
+    qrValid: false,
     sessionData: null,
   };
 
   const client = await wppconnect.create({
     session: name,
     catchQR: async (base64Qr) => {
-      // Remove QR anterior se existir
       if (sessions[name].qrPath && fs.existsSync(sessions[name].qrPath)) {
         fs.unlinkSync(sessions[name].qrPath);
       }
-      // Salva novo QR
       const qrBuffer = Buffer.from(base64Qr.split(",")[1], "base64");
       const qrFilePath = path.join(sessionDataDir, "qrcode.png");
       fs.writeFileSync(qrFilePath, qrBuffer);
@@ -124,15 +123,13 @@ app.get("/qr/:name.png", async (req, res) => {
 
   const session = sessions[name];
 
-  // Se já existe QR e ainda é válido
   if (session.qrPath && fs.existsSync(session.qrPath) && session.qrValid) {
     logRequest("/qr", `QR code ainda válido para sessão "${name}"`);
     return res.sendFile(session.qrPath);
   }
 
-  // Senão: força gerar novo QR
   try {
-    await session.client.getQr(); // requisita QR do WppConnect
+    await session.client.getQr();
     if (session.qrPath && fs.existsSync(session.qrPath)) {
       logRequest("/qr", `Novo QR code gerado para sessão "${name}"`);
       return res.sendFile(session.qrPath);
@@ -161,6 +158,32 @@ app.delete("/session/:name", (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// ───── NOVA ROTA: Retornar dados da sessão ─────
+app.get("/session-data/:name", (req, res) => {
+  const { name } = req.params;
+  if (!sessions[name]) {
+    return res.status(404).json({ success: false, error: "Sessão não encontrada" });
+  }
+
+  const session = sessions[name];
+
+  if (!session.connected || !session.sessionData) {
+    return res.status(400).json({ success: false, error: "Sessão não conectada" });
+  }
+
+  // Retorna dados da sessão
+  const data = {
+    name,
+    connected: session.connected,
+    sessionData: session.sessionData, // token de sessão do navegador
+    qrValid: session.qrValid,
+    qrPath: session.qrPath ? `/qr/${name}.png` : null,
+  };
+
+  logRequest("/session-data", `Dados retornados para sessão "${name}"`);
+  res.json({ success: true, data });
 });
 
 // Servidor
