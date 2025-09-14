@@ -15,13 +15,13 @@ const SESSION_FOLDER = path.join(__dirname, "conectados");
 if (!fs.existsSync(SESSION_FOLDER)) fs.mkdirSync(SESSION_FOLDER);
 
 // ----------------- LOG -----------------
-function logResponse(endpoint, message) {
+function logRequest(endpoint, message) {
   console.log(`[${new Date().toISOString()}] ${endpoint} → ${message}`);
 }
 
 // ----------------- SESSÕES EM MEMÓRIA -----------------
 let sessions = {}; 
-// Estrutura: { name: { client, qrPath, connected, sessionData } }
+// Estrutura: { name: { client, qrPath, qrTimestamp, connected, sessionData } }
 
 // ----------------- RESTAURAR SESSÕES -----------------
 function restoreSessions() {
@@ -33,13 +33,14 @@ function restoreSessions() {
       sessions[name] = {
         client: null,
         qrPath: null,
+        qrTimestamp: null,
         connected: data.connected || false,
         sessionData: data.sessionData || null,
       };
-      logResponse("restoreSessions", `Sessão "${name}" restaurada`);
+      logRequest("restoreSessions", `Sessão "${name}" restaurada`);
     }
   } catch (err) {
-    logResponse("restoreSessions", `Erro restaurando sessões: ${err.message}`);
+    logRequest("restoreSessions", `Erro restaurando sessões: ${err.message}`);
   }
 }
 restoreSessions();
@@ -48,18 +49,18 @@ restoreSessions();
 app.post("/session/:name", async (req, res) => {
   const { name } = req.params;
   const endpoint = "/session/:name (POST)";
-  logResponse(endpoint, `Solicitado criar sessão "${name}"`);
+  logRequest(endpoint, `Solicitado criar sessão "${name}"`);
 
   if (!name) {
     const msg = "Nome inválido";
     res.json({ success: false, error: msg });
-    return logResponse(endpoint, `Retorno: ${msg}`);
+    return logRequest(endpoint, `Retorno: ${msg}`);
   }
 
   if (sessions[name] && sessions[name].client) {
     const msg = "Sessão já existe";
     res.json({ success: false, error: msg });
-    return logResponse(endpoint, `Retorno: ${msg}`);
+    return logRequest(endpoint, `Retorno: ${msg}`);
   }
 
   try {
@@ -68,7 +69,7 @@ app.post("/session/:name", async (req, res) => {
 
     const client = await wppconnect.create({
       session: name,
-      catchQR: () => {}, // QR somente quando solicitado
+      catchQR: () => {}, // QR só quando solicitado
       statusFind: async (statusSession) => {
         if (statusSession === "isLogged") {
           sessions[name].connected = true;
@@ -84,9 +85,9 @@ app.post("/session/:name", async (req, res) => {
                 2
               )
             );
-            logResponse(endpoint, `Sessão "${name}" conectada e salva`);
+            logRequest(endpoint, `Sessão "${name}" conectada e salva`);
           } catch (err) {
-            logResponse(endpoint, `Erro salvando token da sessão "${name}": ${err.message}`);
+            logRequest(endpoint, `Erro salvando token da sessão "${name}": ${err.message}`);
           }
         }
       },
@@ -101,23 +102,24 @@ app.post("/session/:name", async (req, res) => {
     sessions[name] = {
       client,
       qrPath: null,
+      qrTimestamp: null,
       connected: false,
       sessionData: null,
     };
 
     const msg = "Sessão criada. QR disponível somente quando solicitado.";
     res.json({ success: true, name, message: msg });
-    logResponse(endpoint, `Retorno: ${msg}`);
+    logRequest(endpoint, `Retorno: ${msg}`);
   } catch (err) {
     res.json({ success: false, error: err.message });
-    logResponse(endpoint, `Erro: ${err.message}`);
+    logRequest(endpoint, `Erro: ${err.message}`);
   }
 });
 
-// ----------------- LISTAR TODAS AS SESSÕES -----------------
+// ----------------- LISTAR SESSÕES -----------------
 app.get("/sessions", (req, res) => {
   const endpoint = "/sessions (GET)";
-  logResponse(endpoint, "Solicitado listar sessões");
+  logRequest(endpoint, "Solicitado listar sessões");
 
   try {
     let list = [];
@@ -139,11 +141,11 @@ app.get("/sessions", (req, res) => {
 
     const msg = list.length ? `Total de sessões: ${list.length}` : "Nenhuma sessão cadastrada";
     res.json({ success: true, sessions: list, message: msg });
-    logResponse(endpoint, `Retorno: ${JSON.stringify(list)}`);
+    logRequest(endpoint, `Retorno: ${JSON.stringify(list)}`);
   } catch (err) {
     const msg = `Erro ao listar sessões: ${err.message}`;
     res.json({ success: false, error: msg });
-    logResponse(endpoint, msg);
+    logRequest(endpoint, msg);
   }
 });
 
@@ -151,7 +153,7 @@ app.get("/sessions", (req, res) => {
 app.get("/qr/:name.png", async (req, res) => {
   const { name } = req.params;
   const endpoint = "/qr/:name.png (GET)";
-  logResponse(endpoint, `Solicitado QR da sessão "${name}"`);
+  logRequest(endpoint, `Solicitado QR da sessão "${name}"`);
 
   try {
     const sessionDir = path.join(SESSION_FOLDER, name);
@@ -159,29 +161,43 @@ app.get("/qr/:name.png", async (req, res) => {
 
     const sessionQRPath = path.join(SESSION_FOLDER, name + ".png");
 
-    // Gerar QR code apenas quando solicitado
-    const generateQR = async () => {
-      if (fs.existsSync(sessionQRPath)) fs.unlinkSync(sessionQRPath);
+    // Criar client para gerar QR sem logs extras
+    const client = await wppconnect.create({
+      session: name,
+      catchQR: (qr) => {
+        if (fs.existsSync(sessionQRPath)) fs.unlinkSync(sessionQRPath);
+        fs.writeFileSync(sessionQRPath, Buffer.from(qr, "base64"));
+        if (!sessions[name]) sessions[name] = {};
+        sessions[name].qrPath = sessionQRPath;
+        sessions[name].qrTimestamp = Date.now();
+      },
+      statusFind: () => {}, // apenas gerar QR
+      puppeteerOptions: {
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        userDataDir: sessionDir,
+      },
+      autoClose: 0,
+    });
 
-      await wppconnect.create({
-        session: `temp-${name}-${Date.now()}`,
-        catchQR: (qr) => {
-          fs.writeFileSync(sessionQRPath, Buffer.from(qr, "base64"));
-          if (!sessions[name]) sessions[name] = {};
-          sessions[name].qrPath = sessionQRPath;
-        },
-        puppeteerOptions: { headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"], userDataDir: sessionDir },
-        autoClose: true,
-      });
-    };
+    // Aguardar QR ser gerado
+    const waitForQR = () => new Promise((resolve, reject) => {
+      const check = setInterval(() => {
+        if (sessions[name]?.qrPath && fs.existsSync(sessions[name].qrPath)) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 300);
+      setTimeout(() => reject("Timeout gerando QR"), 15000);
+    });
+    await waitForQR();
 
-    if (!fs.existsSync(sessionQRPath) || !sessions[name]?.qrPath) await generateQR();
-
+    res.setHeader("Content-Type", "image/png");
     res.sendFile(sessionQRPath);
-    logResponse(endpoint, `QR code da sessão "${name}" retornado com sucesso`);
+    logRequest(endpoint, `QR code da sessão "${name}" retornado com sucesso`);
   } catch (err) {
     res.status(404).json({ success: false, error: err.message });
-    logResponse(endpoint, `Retorno: ${err.message}`);
+    logRequest(endpoint, `Retorno: ${err.message}`);
   }
 });
 
@@ -189,7 +205,7 @@ app.get("/qr/:name.png", async (req, res) => {
 app.get("/sessionData/:name", (req, res) => {
   const { name } = req.params;
   const endpoint = "/sessionData/:name (GET)";
-  logResponse(endpoint, `Solicitado dados da sessão "${name}"`);
+  logRequest(endpoint, `Solicitado dados da sessão "${name}"`);
 
   try {
     const sessionDir = path.join(SESSION_FOLDER, name);
@@ -209,10 +225,10 @@ app.get("/sessionData/:name", (req, res) => {
     sessions[name].sessionData = sessionData;
 
     res.json({ success: true, name, connected, sessionData });
-    logResponse(endpoint, `Dados da sessão "${name}" retornados com sucesso`);
+    logRequest(endpoint, `Dados da sessão "${name}" retornados com sucesso`);
   } catch (err) {
     res.json({ success: false, error: err.message });
-    logResponse(endpoint, `Retorno: ${err.message}`);
+    logRequest(endpoint, `Retorno: ${err.message}`);
   }
 });
 
@@ -220,7 +236,7 @@ app.get("/sessionData/:name", (req, res) => {
 app.delete("/delete/session/:name", async (req, res) => {
   const { name } = req.params;
   const endpoint = "/delete/session/:name (DELETE)";
-  logResponse(endpoint, `Solicitado excluir sessão "${name}"`);
+  logRequest(endpoint, `Solicitado excluir sessão "${name}"`);
 
   try {
     const sessionDir = path.join(SESSION_FOLDER, name);
@@ -236,11 +252,12 @@ app.delete("/delete/session/:name", async (req, res) => {
     if (fs.existsSync(jsonFile)) fs.unlinkSync(jsonFile);
     if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true });
 
-    res.json({ success: true, message: `Sessão "${name}" excluída com sucesso` });
-    logResponse(endpoint, `Sessão "${name}" excluída com sucesso`);
+    const msg = `Sessão "${name}" excluída com sucesso`;
+    res.json({ success: true, message: msg });
+    logRequest(endpoint, msg);
   } catch (err) {
     res.json({ success: false, error: err.message });
-    logResponse(endpoint, `Erro: ${err.message}`);
+    logRequest(endpoint, `Erro: ${err.message}`);
   }
 });
 
