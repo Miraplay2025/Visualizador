@@ -21,7 +21,7 @@ function logResponse(endpoint, message) {
 
 // ----------------- SESSÕES EM MEMÓRIA -----------------
 let sessions = {}; 
-// Estrutura: { name: { client, qrPath, qrTimestamp, connected, sessionData } }
+// Estrutura: { name: { client, qrPath, connected, sessionData } }
 
 // ----------------- RESTAURAR SESSÕES -----------------
 function restoreSessions() {
@@ -33,7 +33,6 @@ function restoreSessions() {
       sessions[name] = {
         client: null,
         qrPath: null,
-        qrTimestamp: null,
         connected: data.connected || false,
         sessionData: data.sessionData || null,
       };
@@ -102,7 +101,6 @@ app.post("/session/:name", async (req, res) => {
     sessions[name] = {
       client,
       qrPath: null,
-      qrTimestamp: null,
       connected: false,
       sessionData: null,
     };
@@ -161,20 +159,23 @@ app.get("/qr/:name.png", async (req, res) => {
 
     const sessionQRPath = path.join(SESSION_FOLDER, name + ".png");
 
-    // Criar instância temporária somente para gerar QR
-    await wppconnect.create({
-      session: `temp-${name}-${Date.now()}`,
-      catchQR: (qr) => {
-        fs.writeFileSync(sessionQRPath, Buffer.from(qr, "base64"));
-        if (!sessions[name]) sessions[name] = {};
-        sessions[name].qrPath = sessionQRPath;
-        sessions[name].qrTimestamp = Date.now();
-      },
-      puppeteerOptions: { headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"], userDataDir: sessionDir },
-      autoClose: true, // fecha automaticamente para evitar conflito
-    });
+    // Gerar QR code apenas quando solicitado
+    const generateQR = async () => {
+      if (fs.existsSync(sessionQRPath)) fs.unlinkSync(sessionQRPath);
 
-    if (!fs.existsSync(sessionQRPath)) throw new Error("QR não disponível");
+      await wppconnect.create({
+        session: `temp-${name}-${Date.now()}`,
+        catchQR: (qr) => {
+          fs.writeFileSync(sessionQRPath, Buffer.from(qr, "base64"));
+          if (!sessions[name]) sessions[name] = {};
+          sessions[name].qrPath = sessionQRPath;
+        },
+        puppeteerOptions: { headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"], userDataDir: sessionDir },
+        autoClose: true,
+      });
+    };
+
+    if (!fs.existsSync(sessionQRPath) || !sessions[name]?.qrPath) await generateQR();
 
     res.sendFile(sessionQRPath);
     logResponse(endpoint, `QR code da sessão "${name}" retornado com sucesso`);
@@ -184,7 +185,7 @@ app.get("/qr/:name.png", async (req, res) => {
   }
 });
 
-// ----------------- RETORNAR DADOS DE UMA SESSÃO ESPECÍFICA -----------------
+// ----------------- RETORNAR DADOS DE UMA SESSÃO -----------------
 app.get("/sessionData/:name", (req, res) => {
   const { name } = req.params;
   const endpoint = "/sessionData/:name (GET)";
