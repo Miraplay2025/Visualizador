@@ -16,36 +16,31 @@ if (!fs.existsSync(SESSION_FOLDER)) fs.mkdirSync(SESSION_FOLDER, { recursive: tr
 
 // 🔹 Armazena sessões
 const sessions = new Map();
+const sessionLocks = new Map(); // mutex por sessão
 
-// 🔹 Locks por sessão (mutex)
-const sessionLocks = new Map();
-
-// Função de log
 function log(route, msg) {
   console.log(`[${new Date().toISOString()}] ${route} → ${msg}`);
 }
 
-// Mutex: garante que apenas UMA operação rode por vez por sessão
+// Mutex por sessão
 async function runWithLock(name, fn) {
   if (!sessionLocks.has(name)) {
     sessionLocks.set(name, Promise.resolve());
   }
-
   const lock = sessionLocks.get(name);
   const newLock = lock.then(() => fn()).catch(() => {}).finally(() => {});
   sessionLocks.set(name, newLock);
   return newLock;
 }
 
-// Criar sessão
+// Criar sessão persistente
 async function createSession(name) {
   if (sessions.has(name) && sessions.get(name).client) {
     return sessions.get(name).client;
   }
 
-  const sessionDataDir = path.join(SESSION_FOLDER, name);
-  if (!fs.existsSync(sessionDataDir)) fs.mkdirSync(sessionDataDir, { recursive: true });
-
+  const sessionDir = path.join(SESSION_FOLDER, name);
+  if (!fs.existsSync(sessionDir)) fs.mkdirSync(sessionDir, { recursive: true });
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `${name}-`));
 
   const sessionInfo = {
@@ -59,23 +54,24 @@ async function createSession(name) {
 
   const client = await wppconnect.create({
     session: name,
+    folderNameToken: SESSION_FOLDER, // 🔹 salva tokens de forma persistente
+    createPathFileToken: true,
     catchQR: async (base64Qr) => {
       try {
         if (!sessions.has(name)) return;
-
         const session = sessions.get(name);
+
         if (session.qrPath && fs.existsSync(session.qrPath)) {
           fs.unlinkSync(session.qrPath);
         }
 
         const qrBuffer = Buffer.from(base64Qr.split(",")[1], "base64");
-        const qrFilePath = path.join(sessionDataDir, "qrcode.png");
+        const qrFilePath = path.join(sessionDir, "qrcode.png");
         fs.writeFileSync(qrFilePath, qrBuffer);
 
         session.qrPath = qrFilePath;
         session.qrValid = true;
-
-        log("catchQR", `QR code atualizado para sessão "${name}"`);
+        log("catchQR", `QR atualizado para sessão "${name}"`);
       } catch (err) {
         log("catchQR", `Erro ao salvar QR da sessão "${name}": ${err.message}`);
       }
@@ -90,6 +86,9 @@ async function createSession(name) {
           if (sessions.has(name)) sessions.get(name).sessionData = token;
         });
         log("statusFind", `Sessão "${name}" conectada`);
+      } else if (statusSession === "qrReadSuccess") {
+        session.qrValid = false;
+        log("statusFind", `QR lido para sessão "${name}"`);
       } else if (statusSession === "qrReadFail" || statusSession === "qrTimeout") {
         session.qrValid = false;
         if (session.qrPath && fs.existsSync(session.qrPath)) {
@@ -110,13 +109,13 @@ async function createSession(name) {
         "--single-process",
         "--no-zygote",
       ],
-      userDataDir: sessionDataDir,
+      userDataDir: sessionDir,
       cacheDirectory: tmpDir,
     },
     autoClose: 0,
     disableWelcome: true,
-    deleteSessionDataOnLogout: false,
-    restartOnCrash: false,
+    deleteSessionDataOnLogout: false, // 🔹 nunca apagar tokens
+    restartOnCrash: false, // 🔹 não recriar sozinho
   });
 
   sessionInfo.client = client;
@@ -145,13 +144,12 @@ app.get("/sessions", (req, res) => {
   res.json({ success: true, sessions: all });
 });
 
-// Retornar QR code (com lock)
+// QR de uma sessão
 app.get("/qr/:name.png", async (req, res) => {
   const { name } = req.params;
   if (!sessions.has(name)) {
     return res.status(404).json({ success: false, error: "Sessão não encontrada" });
   }
-
   const session = sessions.get(name);
 
   await runWithLock(name, async () => {
@@ -168,13 +166,12 @@ app.get("/qr/:name.png", async (req, res) => {
   }
 });
 
-// Excluir sessão
+// Excluir sessão manualmente
 app.delete("/session/:name", (req, res) => {
   const { name } = req.params;
   if (!sessions.has(name)) {
     return res.status(404).json({ success: false, error: "Sessão não encontrada" });
   }
-
   try {
     const session = sessions.get(name);
     if (session.client) session.client.close();
@@ -199,7 +196,6 @@ app.get("/session-data/:name", (req, res) => {
   if (!sessions.has(name)) {
     return res.status(404).json({ success: false, error: "Sessão não encontrada" });
   }
-
   const s = sessions.get(name);
   res.json({
     success: true,
