@@ -14,26 +14,30 @@ const PORT = process.env.PORT || 10000;
 const SESSION_FOLDER = path.join(__dirname, "conectados");
 if (!fs.existsSync(SESSION_FOLDER)) fs.mkdirSync(SESSION_FOLDER, { recursive: true });
 
-// 🔹 Armazena sessões
+// 🔹 Sessões em memória
 const sessions = new Map();
-const sessionLocks = new Map(); // mutex por sessão
+// 🔹 Locks por sessão
+const sessionLocks = new Map();
 
+// ────────── Funções utilitárias ──────────
 function log(route, msg) {
   console.log(`[${new Date().toISOString()}] ${route} → ${msg}`);
 }
 
-// Mutex por sessão
+// Mutex por sessão → garante que requisições simultâneas da mesma sessão não se sobreponham
 async function runWithLock(name, fn) {
   if (!sessionLocks.has(name)) {
     sessionLocks.set(name, Promise.resolve());
   }
   const lock = sessionLocks.get(name);
-  const newLock = lock.then(() => fn()).catch(() => {}).finally(() => {});
+  const newLock = lock
+    .then(() => fn())
+    .catch((err) => log("LOCK", `Erro em sessão "${name}": ${err.message}`));
   sessionLocks.set(name, newLock);
   return newLock;
 }
 
-// Criar sessão persistente
+// ────────── Criar sessão ──────────
 async function createSession(name) {
   if (sessions.has(name) && sessions.get(name).client) {
     return sessions.get(name).client;
@@ -54,13 +58,14 @@ async function createSession(name) {
 
   const client = await wppconnect.create({
     session: name,
-    folderNameToken: SESSION_FOLDER, // 🔹 salva tokens de forma persistente
+    folderNameToken: SESSION_FOLDER, // 🔹 salva tokens persistentes
     createPathFileToken: true,
     catchQR: async (base64Qr) => {
       try {
         if (!sessions.has(name)) return;
         const session = sessions.get(name);
 
+        // sobrescreve QR anterior
         if (session.qrPath && fs.existsSync(session.qrPath)) {
           fs.unlinkSync(session.qrPath);
         }
@@ -112,23 +117,25 @@ async function createSession(name) {
       userDataDir: sessionDir,
       cacheDirectory: tmpDir,
     },
-    autoClose: 0,
+    autoClose: 0, // 🔴 nunca fechar sozinho
     disableWelcome: true,
-    deleteSessionDataOnLogout: false, // 🔹 nunca apagar tokens
-    restartOnCrash: false, // 🔹 não recriar sozinho
+    deleteSessionDataOnLogout: false, // 🔴 não excluir dados
+    restartOnCrash: false, // 🔴 não reiniciar sozinho
   });
 
   sessionInfo.client = client;
   return client;
 }
 
-// ───── ROTAS ─────
+// ────────── ROTAS ──────────
 
 // Criar sessão
 app.post("/session/:name", async (req, res) => {
   const { name } = req.params;
   try {
-    await createSession(name);
+    await runWithLock(name, async () => {
+      await createSession(name);
+    });
     res.json({ success: true, message: `Sessão "${name}" criada` });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -144,12 +151,13 @@ app.get("/sessions", (req, res) => {
   res.json({ success: true, sessions: all });
 });
 
-// QR de uma sessão
+// QR de uma sessão (com lock)
 app.get("/qr/:name.png", async (req, res) => {
   const { name } = req.params;
   if (!sessions.has(name)) {
     return res.status(404).json({ success: false, error: "Sessão não encontrada" });
   }
+
   const session = sessions.get(name);
 
   await runWithLock(name, async () => {
@@ -166,7 +174,7 @@ app.get("/qr/:name.png", async (req, res) => {
   }
 });
 
-// Excluir sessão manualmente
+// Excluir sessão manual
 app.delete("/session/:name", (req, res) => {
   const { name } = req.params;
   if (!sessions.has(name)) {
@@ -209,7 +217,7 @@ app.get("/session-data/:name", (req, res) => {
   });
 });
 
-// Servidor
+// ────────── Start ──────────
 app.listen(PORT, () => {
   console.log(`🔥 Servidor rodando na porta ${PORT}`);
 });
