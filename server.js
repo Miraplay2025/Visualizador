@@ -21,7 +21,7 @@ let sessions = {};
 // Estrutura: { name: { client, qrPath, qrTimestamp, connected, sessionData } }
 
 // ----------------- LOG SIMPLES -----------------
-function logResponse(endpoint, message, data = {}) {
+function logResponse(endpoint, message) {
   console.log(`[${new Date().toISOString()}] ${endpoint} → ${message}`);
 }
 
@@ -147,7 +147,7 @@ app.delete("/session/:name", async (req, res) => {
   }
 });
 
-// ----------------- LISTAR TODAS AS SESSÕES -----------------
+// ----------------- LISTAR TODAS AS SESSÕES (Conectadas e Não Conectadas) -----------------
 app.get("/sessions", (req, res) => {
   const endpoint = "/sessions (GET)";
   logResponse(endpoint, "Solicitado listar sessões");
