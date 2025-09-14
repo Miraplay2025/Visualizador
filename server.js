@@ -8,15 +8,13 @@ const wppconnect = require("@wppconnect-team/wppconnect");
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static("conectados")); // QR codes e dados
+app.use(express.static("conectados"));
 
 const PORT = 10000;
-
-// ----------------- PASTA GLOBAL -----------------
 const SESSION_FOLDER = path.join(__dirname, "conectados");
 if (!fs.existsSync(SESSION_FOLDER)) fs.mkdirSync(SESSION_FOLDER);
 
-// ----------------- LOG SIMPLES -----------------
+// ----------------- LOG -----------------
 function logResponse(endpoint, message) {
   console.log(`[${new Date().toISOString()}] ${endpoint} → ${message}`);
 }
@@ -25,7 +23,7 @@ function logResponse(endpoint, message) {
 let sessions = {}; 
 // Estrutura: { name: { client, qrPath, qrTimestamp, connected, sessionData } }
 
-// ----------------- RESTAURAR SESSÕES EM MEMÓRIA -----------------
+// ----------------- RESTAURAR SESSÕES -----------------
 function restoreSessions() {
   try {
     const files = fs.readdirSync(SESSION_FOLDER).filter(f => f.endsWith(".json"));
@@ -39,10 +37,10 @@ function restoreSessions() {
         connected: data.connected || false,
         sessionData: data.sessionData || null,
       };
-      logResponse("restoreSessions", `Sessão "${name}" restaurada na memória`);
+      logResponse("restoreSessions", `Sessão "${name}" restaurada`);
     }
   } catch (err) {
-    logResponse("restoreSessions", `Erro ao restaurar sessões: ${err.message}`);
+    logResponse("restoreSessions", `Erro restaurando sessões: ${err.message}`);
   }
 }
 restoreSessions();
@@ -71,7 +69,7 @@ app.post("/session/:name", async (req, res) => {
 
     const client = await wppconnect.create({
       session: name,
-      catchQR: () => {}, // QR gerado somente quando solicitado
+      catchQR: () => {}, // QR somente quando solicitado
       statusFind: async (statusSession) => {
         if (statusSession === "isLogged") {
           sessions[name].connected = true;
@@ -118,38 +116,6 @@ app.post("/session/:name", async (req, res) => {
   }
 });
 
-// ----------------- EXCLUIR SESSÃO -----------------
-app.delete("/session/:name", async (req, res) => {
-  const { name } = req.params;
-  const endpoint = "/session/:name (DELETE)";
-  logResponse(endpoint, `Solicitado excluir sessão "${name}"`);
-
-  if (!sessions[name]) {
-    const msg = "Sessão não encontrada";
-    res.json({ success: false, error: msg });
-    return logResponse(endpoint, `Retorno: ${msg}`);
-  }
-
-  try {
-    if (sessions[name].client) await sessions[name].client.logout();
-    delete sessions[name];
-
-    const qrFile = path.join(SESSION_FOLDER, name + ".png");
-    const jsonFile = path.join(SESSION_FOLDER, name + ".json");
-    const sessionDir = path.join(SESSION_FOLDER, name);
-
-    if (fs.existsSync(qrFile)) fs.unlinkSync(qrFile);
-    if (fs.existsSync(jsonFile)) fs.unlinkSync(jsonFile);
-    if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true });
-
-    res.json({ success: true, message: `Sessão "${name}" excluída` });
-    logResponse(endpoint, `Sessão "${name}" excluída com sucesso`);
-  } catch (err) {
-    res.json({ success: false, error: err.message });
-    logResponse(endpoint, `Erro: ${err.message}`);
-  }
-});
-
 // ----------------- LISTAR TODAS AS SESSÕES -----------------
 app.get("/sessions", (req, res) => {
   const endpoint = "/sessions (GET)";
@@ -167,15 +133,13 @@ app.get("/sessions", (req, res) => {
           try {
             const data = JSON.parse(fs.readFileSync(jsonFile));
             connected = data.connected || false;
-          } catch (err) {
-            logResponse(endpoint, `Erro lendo JSON da sessão ${sessionName}: ${err.message}`);
-          }
+          } catch {}
         }
         list.push({ name: sessionName, connected });
       }
     }
 
-    const msg = list.length ? `Total de sessões encontradas: ${list.length}` : "Nenhuma sessão cadastrada";
+    const msg = list.length ? `Total de sessões: ${list.length}` : "Nenhuma sessão cadastrada";
     res.json({ success: true, sessions: list, message: msg });
     logResponse(endpoint, `Retorno: ${JSON.stringify(list)}`);
   } catch (err) {
@@ -191,90 +155,92 @@ app.get("/qr/:name.png", async (req, res) => {
   const endpoint = "/qr/:name.png (GET)";
   logResponse(endpoint, `Solicitado QR da sessão "${name}"`);
 
-  if (!sessions[name]) {
-    const msg = "Sessão não encontrada";
-    res.status(404).json({ success: false, error: msg });
-    return logResponse(endpoint, `Retorno: ${msg}`);
-  }
-
   try {
+    const sessionDir = path.join(SESSION_FOLDER, name);
+    if (!fs.existsSync(sessionDir)) throw new Error("Sessão não encontrada");
+
     const sessionQRPath = path.join(SESSION_FOLDER, name + ".png");
 
     await wppconnect.create({
       session: name,
       catchQR: (qr) => {
         fs.writeFileSync(sessionQRPath, Buffer.from(qr, "base64"));
+        if (!sessions[name]) sessions[name] = {};
         sessions[name].qrPath = sessionQRPath;
         sessions[name].qrTimestamp = Date.now();
       },
-      puppeteerOptions: { headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] },
+      puppeteerOptions: { headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"], userDataDir: sessionDir },
       autoClose: 0,
     });
 
-    if (!fs.existsSync(sessionQRPath)) {
-      const msg = "QR não disponível";
-      res.status(404).json({ success: false, error: msg });
-      return logResponse(endpoint, `Retorno: ${msg}`);
-    }
+    if (!fs.existsSync(sessionQRPath)) throw new Error("QR não disponível");
 
     res.sendFile(sessionQRPath);
-    logResponse(endpoint, `QR code da sessão "${name}" enviado`);
+    logResponse(endpoint, `QR code da sessão "${name}" retornado com sucesso`);
   } catch (err) {
-    const msg = `Erro geração QR: ${err.message}`;
-    res.status(500).json({ success: false, error: msg });
-    logResponse(endpoint, msg);
+    res.status(404).json({ success: false, error: err.message });
+    logResponse(endpoint, `Retorno: ${err.message}`);
   }
 });
 
-// ----------------- DADOS DA SESSÃO -----------------
+// ----------------- RETORNAR DADOS DE UMA SESSÃO ESPECÍFICA -----------------
 app.get("/sessionData/:name", (req, res) => {
   const { name } = req.params;
   const endpoint = "/sessionData/:name (GET)";
   logResponse(endpoint, `Solicitado dados da sessão "${name}"`);
 
-  if (!sessions[name]) {
-    const msg = "Sessão não encontrada";
-    res.json({ success: false, error: msg });
-    return logResponse(endpoint, `Retorno: ${msg}`);
-  }
+  try {
+    const sessionDir = path.join(SESSION_FOLDER, name);
+    if (!fs.existsSync(sessionDir)) throw new Error("Sessão não encontrada");
 
-  const data = {
-    success: true,
-    name,
-    connected: sessions[name].connected || false,
-    sessionData: sessions[name].sessionData || null,
-  };
-  res.json(data);
-  logResponse(endpoint, `Retorno: Dados da sessão enviados`);
+    const jsonFile = path.join(SESSION_FOLDER, name + ".json");
+    let connected = false;
+    let sessionData = null;
+    if (fs.existsSync(jsonFile)) {
+      const data = JSON.parse(fs.readFileSync(jsonFile));
+      connected = data.connected || false;
+      sessionData = data.sessionData || null;
+    }
+
+    if (!sessions[name]) sessions[name] = {};
+    sessions[name].connected = connected;
+    sessions[name].sessionData = sessionData;
+
+    res.json({ success: true, name, connected, sessionData });
+    logResponse(endpoint, `Dados da sessão "${name}" retornados com sucesso`);
+  } catch (err) {
+    res.json({ success: false, error: err.message });
+    logResponse(endpoint, `Retorno: ${err.message}`);
+  }
 });
 
-// ----------------- ENVIAR MENSAGEM -----------------
-app.post("/sendMessage/:name", async (req, res) => {
+// ----------------- EXCLUIR SESSÃO -----------------
+app.delete("/delete/session/:name", async (req, res) => {
   const { name } = req.params;
-  const { to, message } = req.body;
-  const endpoint = "/sendMessage/:name (POST)";
-  logResponse(endpoint, `Solicitado enviar mensagem pela sessão "${name}"`);
-
-  if (!sessions[name] || !sessions[name].connected) {
-    const msg = "Sessão não conectada";
-    res.json({ success: false, error: msg });
-    return logResponse(endpoint, `Retorno: ${msg}`);
-  }
-
-  if (!to || !message) {
-    const msg = "Campos 'to' e 'message' são obrigatórios";
-    res.json({ success: false, error: msg });
-    return logResponse(endpoint, `Retorno: ${msg}`);
-  }
+  const endpoint = "/delete/session/:name (DELETE)";
+  logResponse(endpoint, `Solicitado excluir sessão "${name}"`);
 
   try {
-    await sessions[name].client.sendText(to, message);
-    res.json({ success: true, to, message });
-    logResponse(endpoint, `Mensagem enviada para ${to}: "${message}"`);
+    const sessionDir = path.join(SESSION_FOLDER, name);
+    if (!fs.existsSync(sessionDir)) throw new Error("Sessão não encontrada");
+
+    // Logout e remover da memória
+    if (sessions[name]?.client) await sessions[name].client.logout();
+    delete sessions[name];
+
+    // Remover arquivos
+    const qrFile = path.join(SESSION_FOLDER, name + ".png");
+    const jsonFile = path.join(SESSION_FOLDER, name + ".json");
+
+    if (fs.existsSync(qrFile)) fs.unlinkSync(qrFile);
+    if (fs.existsSync(jsonFile)) fs.unlinkSync(jsonFile);
+    if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true });
+
+    res.json({ success: true, message: `Sessão "${name}" excluída com sucesso` });
+    logResponse(endpoint, `Sessão "${name}" excluída com sucesso`);
   } catch (err) {
-    const msg = `Erro envio: ${err.message}`;
-    res.json({ success: false, error: msg });
-    logResponse(endpoint, msg);
+    res.json({ success: false, error: err.message });
+    logResponse(endpoint, `Erro: ${err.message}`);
   }
 });
 
