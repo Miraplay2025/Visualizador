@@ -8,7 +8,7 @@ const wppconnect = require("@wppconnect-team/wppconnect");
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static("conectados")); // Pasta de QR e dados
+app.use(express.static("conectados")); // QR codes e dados
 
 const PORT = 10000;
 
@@ -21,8 +21,8 @@ let sessions = {};
 // Estrutura: { name: { client, qrPath, qrTimestamp, connected, sessionData } }
 
 // ----------------- LOG SIMPLES -----------------
-function logRequest(endpoint, info, data = {}) {
-  console.log(`[${new Date().toISOString()}] ${endpoint}: ${info}`);
+function logResponse(endpoint, message, data = {}) {
+  console.log(`[${new Date().toISOString()}] ${endpoint} → ${message}`);
 }
 
 // ----------------- RESTAURAR SESSÕES -----------------
@@ -50,11 +50,19 @@ restoreSessions();
 // ----------------- CRIAR SESSÃO -----------------
 app.post("/session/:name", async (req, res) => {
   const { name } = req.params;
-  logRequest("/session/:name (POST)", `Solicitado criar sessão "${name}"`);
+  const endpoint = "/session/:name (POST)";
+  logResponse(endpoint, `Solicitado criar sessão "${name}"`);
 
-  if (!name) return res.json({ success: false, error: "Nome inválido" });
+  if (!name) {
+    const msg = "Nome inválido";
+    res.json({ success: false, error: msg });
+    return logResponse(endpoint, `Retorno: ${msg}`);
+  }
+
   if (sessions[name] && sessions[name].client) {
-    return res.json({ success: false, error: "Sessão já existe" });
+    const msg = "Sessão já existe";
+    res.json({ success: false, error: msg });
+    return logResponse(endpoint, `Retorno: ${msg}`);
   }
 
   try {
@@ -63,7 +71,7 @@ app.post("/session/:name", async (req, res) => {
 
     const client = await wppconnect.create({
       session: name,
-      catchQR: () => {}, // Não gerar QR automaticamente
+      catchQR: () => {}, // não gerar QR automaticamente
       statusFind: (statusSession) => {
         if (statusSession === "isLogged") {
           sessions[name].connected = true;
@@ -78,7 +86,7 @@ app.post("/session/:name", async (req, res) => {
                 2
               )
             );
-            console.log(`[${name}] Sessão conectada e salva`);
+            logResponse(endpoint, `Sessão "${name}" conectada e salva`);
           });
         }
       },
@@ -87,7 +95,7 @@ app.post("/session/:name", async (req, res) => {
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
         userDataDir: sessionDataDir,
       },
-      autoClose: 0, // nunca fecha sozinho
+      autoClose: 0,
     });
 
     sessions[name] = {
@@ -98,19 +106,26 @@ app.post("/session/:name", async (req, res) => {
       sessionData: null,
     };
 
-    res.json({ success: true, name, message: "Sessão criada. QR disponível apenas quando solicitado." });
+    const msg = "Sessão criada. QR disponível somente quando solicitado.";
+    res.json({ success: true, name, message: msg });
+    logResponse(endpoint, `Retorno: ${msg}`);
   } catch (err) {
-    console.error(`[${name}] Erro criação:`, err.message);
     res.json({ success: false, error: err.message });
+    logResponse(endpoint, `Erro: ${err.message}`);
   }
 });
 
 // ----------------- EXCLUIR SESSÃO -----------------
 app.delete("/session/:name", async (req, res) => {
   const { name } = req.params;
-  logRequest("/session/:name (DELETE)", `Solicitado excluir sessão "${name}"`);
+  const endpoint = "/session/:name (DELETE)";
+  logResponse(endpoint, `Solicitado excluir sessão "${name}"`);
 
-  if (!sessions[name]) return res.json({ success: false, error: "Sessão não encontrada" });
+  if (!sessions[name]) {
+    const msg = "Sessão não encontrada";
+    res.json({ success: false, error: msg });
+    return logResponse(endpoint, `Retorno: ${msg}`);
+  }
 
   try {
     if (sessions[name].client) await sessions[name].client.logout();
@@ -124,34 +139,43 @@ app.delete("/session/:name", async (req, res) => {
     if (fs.existsSync(jsonFile)) fs.unlinkSync(jsonFile);
     if (fs.existsSync(sessionDir)) fs.rmSync(sessionDir, { recursive: true, force: true });
 
-    res.json({ success: true });
-    console.log(`[${name}] Sessão excluída`);
+    res.json({ success: true, message: `Sessão "${name}" excluída` });
+    logResponse(endpoint, `Sessão "${name}" excluída com sucesso`);
   } catch (err) {
-    console.error(`[${name}] Erro exclusão:`, err.message);
     res.json({ success: false, error: err.message });
+    logResponse(endpoint, `Erro: ${err.message}`);
   }
 });
 
 // ----------------- LISTAR TODAS AS SESSÕES -----------------
 app.get("/sessions", (req, res) => {
-  logRequest("/sessions (GET)", "Solicitado listar sessões");
+  const endpoint = "/sessions (GET)";
+  logResponse(endpoint, "Solicitado listar sessões");
+
   const list = Object.keys(sessions).map(name => ({
     name,
     connected: sessions[name].connected || false,
   }));
-  res.json({ success: true, sessions: list });
+
+  const msg = list.length ? `Total de sessões: ${list.length}` : "Nenhuma sessão cadastrada";
+  res.json({ success: true, sessions: list, message: msg });
+  logResponse(endpoint, `Retorno: ${msg}`);
 });
 
 // ----------------- GERAR QR CODE SOB DEMANDA -----------------
 app.get("/qr/:name.png", async (req, res) => {
   const { name } = req.params;
-  logRequest("/qr/:name.png (GET)", `Solicitado QR da sessão "${name}"`);
+  const endpoint = "/qr/:name.png (GET)";
+  logResponse(endpoint, `Solicitado QR da sessão "${name}"`);
 
-  if (!sessions[name]) return res.status(404).json({ success: false, error: "Sessão não encontrada" });
+  if (!sessions[name]) {
+    const msg = "Sessão não encontrada";
+    res.status(404).json({ success: false, error: msg });
+    return logResponse(endpoint, `Retorno: ${msg}`);
+  }
 
   try {
     const sessionQRPath = path.join(SESSION_FOLDER, name + ".png");
-    // Gerar QR somente se não existir ou se for solicitado
     await wppconnect.create({
       session: name,
       catchQR: (qr) => {
@@ -164,50 +188,66 @@ app.get("/qr/:name.png", async (req, res) => {
     });
 
     if (!fs.existsSync(sessionQRPath)) {
-      return res.status(404).json({ success: false, error: "QR não disponível" });
+      const msg = "QR não disponível";
+      res.status(404).json({ success: false, error: msg });
+      return logResponse(endpoint, `Retorno: ${msg}`);
     }
+
     res.sendFile(sessionQRPath);
+    logResponse(endpoint, `QR code da sessão "${name}" enviado`);
   } catch (err) {
-    console.error(`[${name}] Erro geração QR:`, err.message);
     res.status(500).json({ success: false, error: err.message });
+    logResponse(endpoint, `Erro geração QR: ${err.message}`);
   }
 });
 
 // ----------------- DADOS DA SESSÃO -----------------
 app.get("/sessionData/:name", (req, res) => {
   const { name } = req.params;
-  logRequest("/sessionData/:name (GET)", `Solicitado dados da sessão "${name}"`);
+  const endpoint = "/sessionData/:name (GET)";
+  logResponse(endpoint, `Solicitado dados da sessão "${name}"`);
 
-  if (!sessions[name]) return res.json({ success: false, error: "Sessão não encontrada" });
+  if (!sessions[name]) {
+    const msg = "Sessão não encontrada";
+    res.json({ success: false, error: msg });
+    return logResponse(endpoint, `Retorno: ${msg}`);
+  }
 
-  res.json({
+  const data = {
     success: true,
     name,
     connected: sessions[name].connected || false,
     sessionData: sessions[name].sessionData || null,
-  });
+  };
+  res.json(data);
+  logResponse(endpoint, `Retorno: Dados da sessão enviados`);
 });
 
 // ----------------- ENVIAR MENSAGEM -----------------
 app.post("/sendMessage/:name", async (req, res) => {
   const { name } = req.params;
   const { to, message } = req.body;
-
-  logRequest("/sendMessage/:name (POST)", `Solicitado enviar msg pela sessão "${name}"`);
+  const endpoint = "/sendMessage/:name (POST)";
+  logResponse(endpoint, `Solicitado enviar mensagem pela sessão "${name}"`);
 
   if (!sessions[name] || !sessions[name].connected) {
-    return res.json({ success: false, error: "Sessão não conectada" });
+    const msg = "Sessão não conectada";
+    res.json({ success: false, error: msg });
+    return logResponse(endpoint, `Retorno: ${msg}`);
   }
   if (!to || !message) {
-    return res.json({ success: false, error: "Campos 'to' e 'message' são obrigatórios" });
+    const msg = "Campos 'to' e 'message' são obrigatórios";
+    res.json({ success: false, error: msg });
+    return logResponse(endpoint, `Retorno: ${msg}`);
   }
 
   try {
     await sessions[name].client.sendText(to, message);
     res.json({ success: true, to, message });
+    logResponse(endpoint, `Mensagem enviada para ${to}: "${message}"`);
   } catch (err) {
-    console.error(`[${name}] Erro envio:`, err.message);
     res.json({ success: false, error: err.message });
+    logResponse(endpoint, `Erro envio: ${err.message}`);
   }
 });
 
