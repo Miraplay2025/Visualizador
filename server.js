@@ -27,9 +27,9 @@ let sessions = {};
 
 // ----------------- RESTAURAR SESSÕES EM MEMÓRIA -----------------
 function restoreSessions() {
-  const files = fs.readdirSync(SESSION_FOLDER).filter(f => f.endsWith(".json"));
-  for (const file of files) {
-    try {
+  try {
+    const files = fs.readdirSync(SESSION_FOLDER).filter(f => f.endsWith(".json"));
+    for (const file of files) {
       const data = JSON.parse(fs.readFileSync(path.join(SESSION_FOLDER, file)));
       const name = data.name;
       sessions[name] = {
@@ -39,10 +39,10 @@ function restoreSessions() {
         connected: data.connected || false,
         sessionData: data.sessionData || null,
       };
-      console.log(`[${name}] Sessão restaurada na memória`);
-    } catch (err) {
-      console.error(`Erro ao restaurar sessão de ${file}:`, err.message);
+      logResponse("restoreSessions", `Sessão "${name}" restaurada na memória`);
     }
+  } catch (err) {
+    logResponse("restoreSessions", `Erro ao restaurar sessões: ${err.message}`);
   }
 }
 restoreSessions();
@@ -72,10 +72,11 @@ app.post("/session/:name", async (req, res) => {
     const client = await wppconnect.create({
       session: name,
       catchQR: () => {}, // QR gerado somente quando solicitado
-      statusFind: (statusSession) => {
+      statusFind: async (statusSession) => {
         if (statusSession === "isLogged") {
           sessions[name].connected = true;
-          client.getSessionTokenBrowser().then(token => {
+          try {
+            const token = await client.getSessionTokenBrowser();
             sessions[name].sessionData = token;
             const jsonPath = path.join(SESSION_FOLDER, name + ".json");
             fs.writeFileSync(
@@ -87,7 +88,9 @@ app.post("/session/:name", async (req, res) => {
               )
             );
             logResponse(endpoint, `Sessão "${name}" conectada e salva`);
-          });
+          } catch (err) {
+            logResponse(endpoint, `Erro salvando token da sessão "${name}": ${err.message}`);
+          }
         }
       },
       puppeteerOptions: {
@@ -147,36 +150,39 @@ app.delete("/session/:name", async (req, res) => {
   }
 });
 
-// ----------------- LISTAR TODAS AS SESSÕES (DA PASTA) -----------------
+// ----------------- LISTAR TODAS AS SESSÕES -----------------
 app.get("/sessions", (req, res) => {
   const endpoint = "/sessions (GET)";
   logResponse(endpoint, "Solicitado listar sessões");
 
-  let list = [];
-
-  const items = fs.readdirSync(SESSION_FOLDER, { withFileTypes: true });
-  for (const item of items) {
-    if (item.isDirectory()) {
-      const sessionName = item.name;
-      const jsonFile = path.join(SESSION_FOLDER, sessionName + ".json");
-      let connected = false;
-
-      if (fs.existsSync(jsonFile)) {
-        try {
-          const data = JSON.parse(fs.readFileSync(jsonFile));
-          connected = data.connected || false;
-        } catch (err) {
-          console.error(`Erro lendo JSON da sessão ${sessionName}:`, err.message);
+  try {
+    let list = [];
+    const items = fs.readdirSync(SESSION_FOLDER, { withFileTypes: true });
+    for (const item of items) {
+      if (item.isDirectory()) {
+        const sessionName = item.name;
+        const jsonFile = path.join(SESSION_FOLDER, sessionName + ".json");
+        let connected = false;
+        if (fs.existsSync(jsonFile)) {
+          try {
+            const data = JSON.parse(fs.readFileSync(jsonFile));
+            connected = data.connected || false;
+          } catch (err) {
+            logResponse(endpoint, `Erro lendo JSON da sessão ${sessionName}: ${err.message}`);
+          }
         }
+        list.push({ name: sessionName, connected });
       }
-
-      list.push({ name: sessionName, connected });
     }
-  }
 
-  const msg = list.length ? `Total de sessões encontradas: ${list.length}` : "Nenhuma sessão cadastrada";
-  res.json({ success: true, sessions: list, message: msg });
-  logResponse(endpoint, `Retorno: ${JSON.stringify(list)}`);
+    const msg = list.length ? `Total de sessões encontradas: ${list.length}` : "Nenhuma sessão cadastrada";
+    res.json({ success: true, sessions: list, message: msg });
+    logResponse(endpoint, `Retorno: ${JSON.stringify(list)}`);
+  } catch (err) {
+    const msg = `Erro ao listar sessões: ${err.message}`;
+    res.json({ success: false, error: msg });
+    logResponse(endpoint, msg);
+  }
 });
 
 // ----------------- GERAR QR CODE SOB DEMANDA -----------------
@@ -193,6 +199,7 @@ app.get("/qr/:name.png", async (req, res) => {
 
   try {
     const sessionQRPath = path.join(SESSION_FOLDER, name + ".png");
+
     await wppconnect.create({
       session: name,
       catchQR: (qr) => {
@@ -213,8 +220,9 @@ app.get("/qr/:name.png", async (req, res) => {
     res.sendFile(sessionQRPath);
     logResponse(endpoint, `QR code da sessão "${name}" enviado`);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-    logResponse(endpoint, `Erro geração QR: ${err.message}`);
+    const msg = `Erro geração QR: ${err.message}`;
+    res.status(500).json({ success: false, error: msg });
+    logResponse(endpoint, msg);
   }
 });
 
@@ -252,6 +260,7 @@ app.post("/sendMessage/:name", async (req, res) => {
     res.json({ success: false, error: msg });
     return logResponse(endpoint, `Retorno: ${msg}`);
   }
+
   if (!to || !message) {
     const msg = "Campos 'to' e 'message' são obrigatórios";
     res.json({ success: false, error: msg });
@@ -263,8 +272,9 @@ app.post("/sendMessage/:name", async (req, res) => {
     res.json({ success: true, to, message });
     logResponse(endpoint, `Mensagem enviada para ${to}: "${message}"`);
   } catch (err) {
-    res.json({ success: false, error: err.message });
-    logResponse(endpoint, `Erro envio: ${err.message}`);
+    const msg = `Erro envio: ${err.message}`;
+    res.json({ success: false, error: msg });
+    logResponse(endpoint, msg);
   }
 });
 
