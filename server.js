@@ -16,16 +16,16 @@ const PORT = 10000;
 const SESSION_FOLDER = path.join(__dirname, "conectados");
 if (!fs.existsSync(SESSION_FOLDER)) fs.mkdirSync(SESSION_FOLDER);
 
-// ----------------- SESSÕES EM MEMÓRIA -----------------
-let sessions = {}; 
-// Estrutura: { name: { client, qrPath, qrTimestamp, connected, sessionData } }
-
 // ----------------- LOG SIMPLES -----------------
 function logResponse(endpoint, message) {
   console.log(`[${new Date().toISOString()}] ${endpoint} → ${message}`);
 }
 
-// ----------------- RESTAURAR SESSÕES -----------------
+// ----------------- SESSÕES EM MEMÓRIA -----------------
+let sessions = {}; 
+// Estrutura: { name: { client, qrPath, qrTimestamp, connected, sessionData } }
+
+// ----------------- RESTAURAR SESSÕES EM MEMÓRIA -----------------
 function restoreSessions() {
   const files = fs.readdirSync(SESSION_FOLDER).filter(f => f.endsWith(".json"));
   for (const file of files) {
@@ -33,13 +33,13 @@ function restoreSessions() {
       const data = JSON.parse(fs.readFileSync(path.join(SESSION_FOLDER, file)));
       const name = data.name;
       sessions[name] = {
-        client: null, // será recriado ao conectar
+        client: null,
         qrPath: null,
         qrTimestamp: null,
         connected: data.connected || false,
         sessionData: data.sessionData || null,
       };
-      console.log(`[${name}] Sessão restaurada`);
+      console.log(`[${name}] Sessão restaurada na memória`);
     } catch (err) {
       console.error(`Erro ao restaurar sessão de ${file}:`, err.message);
     }
@@ -71,7 +71,7 @@ app.post("/session/:name", async (req, res) => {
 
     const client = await wppconnect.create({
       session: name,
-      catchQR: () => {}, // não gerar QR automaticamente
+      catchQR: () => {}, // QR gerado somente quando solicitado
       statusFind: (statusSession) => {
         if (statusSession === "isLogged") {
           sessions[name].connected = true;
@@ -147,19 +147,36 @@ app.delete("/session/:name", async (req, res) => {
   }
 });
 
-// ----------------- LISTAR TODAS AS SESSÕES (Conectadas e Não Conectadas) -----------------
+// ----------------- LISTAR TODAS AS SESSÕES (DA PASTA) -----------------
 app.get("/sessions", (req, res) => {
   const endpoint = "/sessions (GET)";
   logResponse(endpoint, "Solicitado listar sessões");
 
-  const list = Object.keys(sessions).map(name => ({
-    name,
-    connected: sessions[name].connected || false,
-  }));
+  let list = [];
 
-  const msg = list.length ? `Total de sessões: ${list.length}` : "Nenhuma sessão cadastrada";
+  const items = fs.readdirSync(SESSION_FOLDER, { withFileTypes: true });
+  for (const item of items) {
+    if (item.isDirectory()) {
+      const sessionName = item.name;
+      const jsonFile = path.join(SESSION_FOLDER, sessionName + ".json");
+      let connected = false;
+
+      if (fs.existsSync(jsonFile)) {
+        try {
+          const data = JSON.parse(fs.readFileSync(jsonFile));
+          connected = data.connected || false;
+        } catch (err) {
+          console.error(`Erro lendo JSON da sessão ${sessionName}:`, err.message);
+        }
+      }
+
+      list.push({ name: sessionName, connected });
+    }
+  }
+
+  const msg = list.length ? `Total de sessões encontradas: ${list.length}` : "Nenhuma sessão cadastrada";
   res.json({ success: true, sessions: list, message: msg });
-  logResponse(endpoint, `Retorno: ${msg}`);
+  logResponse(endpoint, `Retorno: ${JSON.stringify(list)}`);
 });
 
 // ----------------- GERAR QR CODE SOB DEMANDA -----------------
