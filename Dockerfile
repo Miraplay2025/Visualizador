@@ -47,7 +47,6 @@ COPY package.json ./
 
 # Instala dependências + força download do Chrome/Chromium do Puppeteer + QRCode
 RUN npm install --production && \
-    npm install qrcode && \
     npx puppeteer browsers install chrome
 
 COPY . .
