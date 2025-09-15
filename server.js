@@ -1,4 +1,4 @@
-// server.js
+ // server.js
 const express = require("express");
 const cors = require("cors");
 const fs = require("fs");
@@ -24,7 +24,7 @@ function log(route, msg) {
   console.log(`[${new Date().toISOString()}] ${route} → ${msg}`);
 }
 
-// Mutex por sessão → garante que requisições simultâneas da mesma sessão não se sobreponham
+// Mutex por sessão
 async function runWithLock(name, fn) {
   if (!sessionLocks.has(name)) {
     sessionLocks.set(name, Promise.resolve());
@@ -65,7 +65,6 @@ async function createSession(name) {
         if (!sessions.has(name)) return;
         const session = sessions.get(name);
 
-        // sobrescreve QR anterior
         if (session.qrPath && fs.existsSync(session.qrPath)) {
           fs.unlinkSync(session.qrPath);
         }
@@ -132,37 +131,49 @@ async function createSession(name) {
 // Criar sessão
 app.post("/session/:name", async (req, res) => {
   const { name } = req.params;
+  log("POST /session", `Requisição recebida para criar sessão "${name}"`);
   try {
     await runWithLock(name, async () => {
       await createSession(name);
     });
-    res.json({ success: true, message: `Sessão "${name}" criada`, session: name });
+    const resposta = { success: true, message: `Sessão criada com sucesso`, name };
+    log("POST /session", JSON.stringify(resposta));
+    res.json(resposta);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    const resposta = { success: false, error: err.message };
+    log("POST /session", JSON.stringify(resposta));
+    res.status(500).json(resposta);
   }
 });
 
 // Listar sessões
 app.get("/sessions", (req, res) => {
+  log("GET /sessions", "Requisição recebida");
   const all = Array.from(sessions.keys()).map((name) => {
     const s = sessions.get(name);
-    return {
-      name,
-      status: s.connected ? "conectado" : "não conectado",
-    };
+    return { name, status: s.connected ? "Conectado" : "Não conectado" };
   });
-  res.json({ success: true, sessions: all });
+  if (all.length === 0) {
+    const resposta = { success: true, message: "Nenhuma sessão encontrada" };
+    log("GET /sessions", JSON.stringify(resposta));
+    return res.json(resposta);
+  }
+  const resposta = { success: true, sessions: all };
+  log("GET /sessions", JSON.stringify(resposta));
+  res.json(resposta);
 });
 
-// QR de uma sessão (com lock)
+// QR de uma sessão
 app.get("/qr/:name.png", async (req, res) => {
   const { name } = req.params;
+  log("GET /qr", `Requisição recebida para sessão "${name}"`);
   if (!sessions.has(name)) {
-    return res.status(404).json({ success: false, error: "Sessão não encontrada" });
+    const resposta = { success: false, error: "Sessão não encontrada" };
+    log("GET /qr", JSON.stringify(resposta));
+    return res.status(404).json(resposta);
   }
 
   const session = sessions.get(name);
-
   await runWithLock(name, async () => {
     if (!session.client) throw new Error("Cliente não inicializado");
     if (!session.qrPath || !fs.existsSync(session.qrPath) || !session.qrValid) {
@@ -171,17 +182,23 @@ app.get("/qr/:name.png", async (req, res) => {
   });
 
   if (session.qrPath && fs.existsSync(session.qrPath)) {
+    log("GET /qr", `QR retornado para sessão "${name}"`);
     return res.sendFile(session.qrPath);
   } else {
-    return res.status(500).json({ success: false, error: "QR não disponível" });
+    const resposta = { success: false, error: "QR não disponível" };
+    log("GET /qr", JSON.stringify(resposta));
+    return res.status(500).json(resposta);
   }
 });
 
 // Excluir sessão manual
 app.delete("/session/:name", (req, res) => {
   const { name } = req.params;
+  log("DELETE /session", `Requisição recebida para excluir sessão "${name}"`);
   if (!sessions.has(name)) {
-    return res.status(404).json({ success: false, error: "Sessão não encontrada" });
+    const resposta = { success: false, error: "Sessão não encontrada" };
+    log("DELETE /session", JSON.stringify(resposta));
+    return res.status(404).json(resposta);
   }
   try {
     const session = sessions.get(name);
@@ -195,32 +212,42 @@ app.delete("/session/:name", (req, res) => {
     sessions.delete(name);
     sessionLocks.delete(name);
 
-    res.json({ success: true, message: `Sessão "${name}" excluída`, session: name });
+    const resposta = { success: true, message: `Sessão "${name}" excluída` };
+    log("DELETE /session", JSON.stringify(resposta));
+    res.json(resposta);
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+    const resposta = { success: false, error: err.message };
+    log("DELETE /session", JSON.stringify(resposta));
+    res.status(500).json(resposta);
   }
 });
 
 // Dados da sessão
 app.get("/session-data/:name", (req, res) => {
   const { name } = req.params;
+  log("GET /session-data", `Requisição recebida para sessão "${name}"`);
   if (!sessions.has(name)) {
-    return res.status(404).json({ success: false, error: "Sessão não encontrada" });
+    const resposta = { success: false, error: "Sessão não encontrada" };
+    log("GET /session-data", JSON.stringify(resposta));
+    return res.status(404).json(resposta);
   }
   const s = sessions.get(name);
-  res.json({
+  const resposta = {
     success: true,
     data: {
       name,
-      connected: s.connected,
+      status: s.connected ? "Conectado" : "Não conectado",
       qrValid: s.qrValid,
       qrPath: s.qrPath ? `/qr/${name}.png` : null,
       sessionData: s.sessionData,
     },
-  });
+  };
+  log("GET /session-data", JSON.stringify(resposta));
+  res.json(resposta);
 });
 
 // ────────── Start ──────────
 app.listen(PORT, () => {
   console.log(`🔥 Servidor rodando na porta ${PORT}`);
 });
+ 
