@@ -13,16 +13,18 @@ app.use(cors());
 app.use(express.json());
 app.use("/qrcodes", express.static(path.join(__dirname, "qrcodes")));
 
-// Middleware de log global
+// Middleware de log global (apenas para requisições HTTP reais)
 app.use((req, res, next) => {
-  const nomeSessao = req.params.nome || req.body.nome || "nome da sessão não passada";
-  console.log(`[${new Date().toISOString()}] 🔹 Requisição recebida: ${req.method} ${req.originalUrl} | Sessão: ${nomeSessao}`);
+  if (req.method && req.originalUrl) {
+    const nomeSessao = req.params?.nome || req.body?.nome || "nome da sessão não passada";
+    console.log(`[${new Date().toISOString()}] 🔹 Requisição recebida: ${req.method} ${req.originalUrl} | Sessão: ${nomeSessao}`);
 
-  const originalJson = res.json;
-  res.json = function (data) {
-    console.log(`[${new Date().toISOString()}] ✅ Resposta enviada (${nomeSessao}): ${JSON.stringify(data)}`);
-    originalJson.call(this, data);
-  };
+    const originalJson = res.json;
+    res.json = function (data) {
+      console.log(`[${new Date().toISOString()}] ✅ Resposta enviada (${nomeSessao}): ${JSON.stringify(data)}`);
+      originalJson.call(this, data);
+    };
+  }
 
   next();
 });
