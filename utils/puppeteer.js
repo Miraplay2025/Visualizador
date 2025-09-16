@@ -10,8 +10,7 @@ async function initBrowser() {
     browser = await puppeteer.launch({
       headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      // evita que o browser feche sozinho
-      autoClose: 0,
+      autoClose: 0, // 🔴 evita que o browser feche sozinho
     });
     page = await browser.newPage();
   }
@@ -32,7 +31,7 @@ async function acessarServidor(endpoint, options = {}) {
     await page.goto(url, { waitUntil: "domcontentloaded" });
 
     // espera 5 segundos pra JS injetado terminar
-    await page.waitForTimeout(5000);
+    await new Promise((resolve) => setTimeout(resolve, 5000));
 
     if (options.method === "POST") {
       const resposta = await page.evaluate(async (dados) => {
@@ -43,8 +42,7 @@ async function acessarServidor(endpoint, options = {}) {
       }, options.data);
 
       try {
-        const json = JSON.parse(resposta);
-        return json;
+        return JSON.parse(resposta);
       } catch {
         return { success: false, error: "Resposta não é JSON", raw: resposta };
       }
@@ -72,4 +70,3 @@ async function fecharBrowser() {
 }
 
 module.exports = { acessarServidor, fecharBrowser };
-
