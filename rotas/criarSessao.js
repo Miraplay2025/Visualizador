@@ -1,5 +1,4 @@
 const { acessarServidor } = require("../utils/puppeteer");
-const { criarSessaoRender } = require("../utils/gerenciarRender");
 
 module.exports = async (req, res) => {
   const nome = req.body.nome;
@@ -11,12 +10,12 @@ module.exports = async (req, res) => {
   console.log(`[${new Date().toISOString()}] 🔹 Criar sessão solicitada: ${nome}`);
 
   try {
-    // Aqui já marcamos a sessão como "conectado = false" no início
+    // Salva no servidor PHP com status inicial "conectado: false"
     const respostaServidor = await acessarServidor("salvar_sessao.php", {
       method: "POST",
       data: { 
         nome, 
-        dados: JSON.stringify({ conectado: false }) // status inicial
+        dados: JSON.stringify({ conectado: false }) 
       },
     });
 
@@ -25,18 +24,7 @@ module.exports = async (req, res) => {
       return res.json(respostaServidor);
     }
 
-    // Criar sessão no wppconnect
-    await criarSessaoRender(respostaServidor.nome);
-
-    // Atualizar servidor com "conectado = true" após criar com sucesso
-    await acessarServidor("salvar_sessao.php", {
-      method: "POST",
-      data: { 
-        nome: respostaServidor.nome, 
-        dados: JSON.stringify({ conectado: true }) 
-      },
-    });
-
+    // Retorna sucesso ao HTML
     res.json({ success: true, nome: respostaServidor.nome });
   } catch (err) {
     console.error(`[${new Date().toISOString()}] ❌ Erro criarSessao (${nome}): ${err.message}`);
