@@ -5,7 +5,7 @@ const { verificarOuCriarSessao } = require("../utils/gerenciarRender");
 
 module.exports = async (req, res) => {
   const nome = req.params.nome;
-  if (!nome) return res.json({ success: false, error: "Nome da sessão é obrigatório" });
+  if (!nome) return res.json({ success: false, error: "Nome da sessão não passada" });
 
   try {
     // 1️⃣ Verificar se a sessão existe no servidor
@@ -31,30 +31,28 @@ module.exports = async (req, res) => {
           method: "POST",
           data: { nome, dados: JSON.stringify({ conectado: true, tokens }) },
         });
-        console.log(`[${new Date().toISOString()}] ✅ Sessão "${nome}" conectada, dados enviados ao servidor`);
+        console.log(`[${new Date().toISOString()}] ✅ Sessão "${nome}" conectada`);
         return res.json({ success: true, message: "Sessão conectada" });
       }
 
       if (status === "PAIRING") {
-        console.log(`[${new Date().toISOString()}] ℹ️ QR atual da sessão "${nome}" ainda válido`);
-        return res.json({ success: true, message: "QR atual ainda válido" });
+        console.log(`[${new Date().toISOString()}] ℹ️ QR da sessão "${nome}" ainda válido`);
+        console.log(`[${new Date().toISOString()}] 🔗 Link QR existente: /qrcodes/${nome}.png`);
+        return res.json({ success: true, message: "QR atual ainda válido", qrUrl: `/qrcodes/${nome}.png` });
       }
 
       // QR expirado → apagar
       fs.unlinkSync(caminhoQr);
     }
 
-    // 5️⃣ Gerar novo QR
+    // 5️⃣ Gerar novo QR apenas se não existe ou expirou
     const qrCode = await client.getQrCode();
-    // Garantir que seja PNG válido
-    const base64Data = qrCode.replace(/^data:image\/png;base64,/, "");
-    fs.writeFileSync(caminhoQr, base64Data, "base64");
-
-    const qrLink = `/qrcodes/${nome}.png`;
-    console.log(`[${new Date().toISOString()}] ✅ QR da sessão "${nome}" gerado com sucesso: ${qrLink}`);
+    fs.writeFileSync(caminhoQr, qrCode.replace(/^data:image\/png;base64,/, ""), "base64");
+    console.log(`[${new Date().toISOString()}] ✅ Novo QR gerado para a sessão "${nome}"`);
+    console.log(`[${new Date().toISOString()}] 🔗 Link QR: /qrcodes/${nome}.png`);
 
     // 6️⃣ Retornar QR novo
-    res.json({ success: true, message: "Novo QRCode gerado", qrUrl: qrLink });
+    res.json({ success: true, message: "Novo QRCode gerado", qrUrl: `/qrcodes/${nome}.png` });
 
     // 7️⃣ Monitorar estado da sessão
     client.onStateChange(async (state) => {
@@ -65,7 +63,7 @@ module.exports = async (req, res) => {
             method: "POST",
             data: { nome, dados: JSON.stringify({ conectado: true, tokens }) },
           });
-          console.log(`[${new Date().toISOString()}] ✅ Sessão "${nome}" conectada, dados enviados ao servidor`);
+          console.log(`[${new Date().toISOString()}] ✅ Sessão "${nome}" conectada e dados enviados ao servidor`);
         } catch (err) {
           console.error(`[${new Date().toISOString()}] ❌ Erro ao atualizar sessão (${nome}): ${err.message}`);
         }
@@ -73,7 +71,8 @@ module.exports = async (req, res) => {
     });
 
   } catch (err) {
-    console.error(`Erro ao gerar QRCode (${nome}):`, err);
+    console.error(`[${new Date().toISOString()}] ❌ Erro obter QRCode (${nome}):`, err.message);
     res.json({ success: false, error: err.message });
   }
 };
+
