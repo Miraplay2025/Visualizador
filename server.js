@@ -34,5 +34,11 @@ app.get("/qrcode/:nome", obterQrcode);
 app.delete("/deletar/:nome", deletarSessao);
 app.post("/salvar", salvarDados);
 
-const PORT = process.env.PORT || 3000;
+// PORT obrigatória no Render
+const PORT = process.env.PORT;
+if (!PORT) {
+  console.error("⚠️ PORT não definida no ambiente");
+  process.exit(1);
+}
+
 app.listen(PORT, () => console.log(`[${new Date().toISOString()}] 🔥 Servidor rodando na porta ${PORT}`));
