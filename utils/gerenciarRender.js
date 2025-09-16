@@ -6,8 +6,19 @@ async function criarSessaoRender(nome) {
 
   const client = await wppconnect.create({
     session: nome,
-    catchQR: () => console.log(`[${new Date().toISOString()}] 🔹 QR gerado (sessão: ${nome})`),
-    statusFind: (status) => console.log(`[${new Date().toISOString()}] 🔹 Sessão ${nome} - status: ${status}`),
+    headless: true, // roda sem interface gráfica
+    autoClose: 0,   // não fecha sozinho
+    browserArgs: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-software-rasterizer"
+    ],
+    catchQR: () => 
+      console.log(`[${new Date().toISOString()}] 🔹 QR gerado (sessão: ${nome})`),
+    statusFind: (status) => 
+      console.log(`[${new Date().toISOString()}] 🔹 Sessão ${nome} - status: ${status}`),
   });
 
   sessoes[nome] = client;
