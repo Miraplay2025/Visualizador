@@ -2,21 +2,22 @@ const { acessarServidor } = require("../utils/puppeteer");
 const { criarSessaoRender } = require("../utils/gerenciarRender");
 
 module.exports = async (req, res) => {
-  try {
-    const { nome } = req.body;
-    if (!nome) return res.json({ success: false, error: "Nome da sessão é obrigatório" });
+  const nome = req.body.nome;
+  if (!nome) {
+    console.log(`[${new Date().toISOString()}] ❌ Criar sessão → nome da sessão não passada`);
+    return res.json({ success: false, error: "Nome da sessão é obrigatório" });
+  }
 
-    // Salva no servidor PHP
+  console.log(`[${new Date().toISOString()}] 🔹 Criar sessão solicitada: ${nome}`);
+
+  try {
     const respostaServidor = await acessarServidor("salvar_sessao.php", {
       method: "POST",
-      data: { nome, dados: JSON.stringify({ status: "criando" }) }
+      data: { nome, dados: JSON.stringify({ status: "criando" }) },
     });
 
-    if (!respostaServidor.success) {
-      return res.json(respostaServidor);
-    }
+    if (!respostaServidor.success) return res.json(respostaServidor);
 
-    // Cria cópia no Render (wppconnect)
     await criarSessaoRender(respostaServidor.nome);
 
     res.json({ success: true, nome: respostaServidor.nome });
