@@ -2,18 +2,21 @@ const { acessarServidor } = require("../utils/puppeteer");
 const { excluirSessaoRender } = require("../utils/gerenciarRender");
 
 module.exports = async (req, res) => {
-  try {
-    const { nome } = req.params;
+  const nome = req.params.nome;
+  if (!nome) {
+    console.log(`[${new Date().toISOString()}] ❌ Deletar sessão → nome da sessão não passada`);
+    return res.json({ success: false, error: "Nome da sessão é obrigatório" });
+  }
 
-    // Exclui no servidor PHP
+  console.log(`[${new Date().toISOString()}] 🔹 Deletar sessão solicitada: ${nome}`);
+
+  try {
     const resposta = await acessarServidor("deletar_sessao.php", {
       method: "POST",
-      data: { nome }
+      data: { nome },
     });
 
-    if (resposta.success) {
-      await excluirSessaoRender(nome); // remove no Render
-    }
+    if (resposta.success) await excluirSessaoRender(nome);
 
     res.json(resposta);
   } catch (err) {
