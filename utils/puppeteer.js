@@ -29,8 +29,8 @@ async function acessarServidor(endpoint, options = {}) {
 
     await page.goto(url, { waitUntil: "domcontentloaded" });
 
-    // espera 5 segundos pra JS injetado terminar
-    await page.waitForTimeout(5000);
+    // espera 5 segundos para garantir carregamento completo (Cloudflare, cookies, etc.)
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     if (options.method === "POST") {
       const resposta = await page.evaluate(async (dados) => {
@@ -41,8 +41,7 @@ async function acessarServidor(endpoint, options = {}) {
       }, options.data);
 
       try {
-        const json = JSON.parse(resposta);
-        return json;
+        return JSON.parse(resposta);
       } catch {
         return { success: false, error: "Resposta não é JSON", raw: resposta };
       }
