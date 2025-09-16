@@ -6,15 +6,12 @@ async function criarSessaoRender(nome) {
 
   const client = await wppconnect.create({
     session: nome,
-    catchQR: (qr) => {
-      console.log(`QR Code gerado para sessão ${nome}`);
-    },
-    statusFind: (status) => {
-      console.log(`Sessão ${nome} - status: ${status}`);
-    }
+    catchQR: () => console.log(`[${new Date().toISOString()}] 🔹 QR gerado (sessão: ${nome})`),
+    statusFind: (status) => console.log(`[${new Date().toISOString()}] 🔹 Sessão ${nome} - status: ${status}`),
   });
 
   sessoes[nome] = client;
+  console.log(`[${new Date().toISOString()}] ✅ Sessão ${nome} criada`);
   return client;
 }
 
@@ -26,6 +23,7 @@ async function excluirSessaoRender(nome) {
   if (sessoes[nome]) {
     await sessoes[nome].close();
     delete sessoes[nome];
+    console.log(`[${new Date().toISOString()}] 🔹 Sessão ${nome} excluída`);
   }
 }
 
