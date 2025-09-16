@@ -27,15 +27,16 @@ module.exports = async (req, res) => {
 
       if (status === "CONNECTED") {
         const tokens = await client.getSessionTokenBrowser();
-        // Enviar dados ao atualizar_sessao.php
         await acessarServidor("atualizar_sessao.php", {
           method: "POST",
           data: { nome, dados: JSON.stringify({ conectado: true, tokens }) },
         });
+        console.log(`[${new Date().toISOString()}] ✅ Sessão "${nome}" conectada, dados enviados ao servidor`);
         return res.json({ success: true, message: "Sessão conectada" });
       }
 
       if (status === "PAIRING") {
+        console.log(`[${new Date().toISOString()}] ℹ️ QR atual da sessão "${nome}" ainda válido`);
         return res.json({ success: true, message: "QR atual ainda válido" });
       }
 
@@ -45,12 +46,17 @@ module.exports = async (req, res) => {
 
     // 5️⃣ Gerar novo QR
     const qrCode = await client.getQrCode();
-    fs.writeFileSync(caminhoQr, qrCode.replace(/^data:image\/png;base64,/, ""), "base64");
+    // Garantir que seja PNG válido
+    const base64Data = qrCode.replace(/^data:image\/png;base64,/, "");
+    fs.writeFileSync(caminhoQr, base64Data, "base64");
+
+    const qrLink = `/qrcodes/${nome}.png`;
+    console.log(`[${new Date().toISOString()}] ✅ QR da sessão "${nome}" gerado com sucesso: ${qrLink}`);
 
     // 6️⃣ Retornar QR novo
-    res.json({ success: true, message: "Novo QRCode gerado", qrUrl: `/qrcodes/${nome}.png` });
+    res.json({ success: true, message: "Novo QRCode gerado", qrUrl: qrLink });
 
-    // 7️⃣ Monitorar estado da sessão → ao conectar envia dados para atualizar_sessao.php
+    // 7️⃣ Monitorar estado da sessão
     client.onStateChange(async (state) => {
       if (state === "CONNECTED") {
         try {
@@ -59,7 +65,7 @@ module.exports = async (req, res) => {
             method: "POST",
             data: { nome, dados: JSON.stringify({ conectado: true, tokens }) },
           });
-          console.log(`[${new Date().toISOString()}] ✅ Sessão "${nome}" conectada e dados enviados ao servidor`);
+          console.log(`[${new Date().toISOString()}] ✅ Sessão "${nome}" conectada, dados enviados ao servidor`);
         } catch (err) {
           console.error(`[${new Date().toISOString()}] ❌ Erro ao atualizar sessão (${nome}): ${err.message}`);
         }
@@ -67,7 +73,7 @@ module.exports = async (req, res) => {
     });
 
   } catch (err) {
-    console.error(`Erro obter QRCode (${nome}):`, err.message);
+    console.error(`Erro ao gerar QRCode (${nome}):`, err);
     res.json({ success: false, error: err.message });
   }
 };
