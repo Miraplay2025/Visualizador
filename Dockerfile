@@ -43,12 +43,14 @@ RUN apt-get update && apt-get install -y \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
 
-COPY package.json ./
+# Copia package.json e package-lock.json
+COPY package*.json ./
 
-# Instala dependências + força download do Chrome/Chromium do Puppeteer + QRCode
+# Instala dependências + Chromium
 RUN npm install --production && \
     npx puppeteer browsers install chrome
 
+# Copia todo o projeto
 COPY . .
 
 EXPOSE 10000
