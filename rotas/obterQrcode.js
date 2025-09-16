@@ -5,20 +5,14 @@ const { verificarOuCriarSessao } = require("../utils/gerenciarRender");
 
 module.exports = async (req, res) => {
   const nome = req.params.nome;
-  if (!nome) {
-    console.log(`[${new Date().toISOString()}] ❌ Requisição sem nome de sessão`);
-    return res.json({ success: false, error: "Nome da sessão não passada" });
-  }
+  if (!nome) return res.json({ success: false, error: "Nome da sessão não passada" });
 
   try {
     // 1️⃣ Verificar se a sessão existe no servidor
     console.log(`[${new Date().toISOString()}] 🔹 Acessando servidor para listar sessões`);
     const respostaServidor = await acessarServidor("listar_sessoes.php");
     const sessao = respostaServidor.sessoes?.find(s => s.nome === nome);
-    if (!sessao) {
-      console.log(`[${new Date().toISOString()}] ❌ Sessão "${nome}" não encontrada no servidor`);
-      return res.json({ success: false, error: "Sessão não encontrada" });
-    }
+    if (!sessao) return res.json({ success: false, error: "Sessão não encontrada" });
 
     // 2️⃣ Criar ou recuperar sessão WPPConnect
     const client = await verificarOuCriarSessao(nome);
@@ -39,19 +33,22 @@ module.exports = async (req, res) => {
           data: { nome, dados: JSON.stringify({ conectado: true, tokens }) },
         });
         console.log(`[${new Date().toISOString()}] ✅ Sessão "${nome}" conectada`);
-        console.log(`[${new Date().toISOString()}] 🔗 QR existente: /qrcodes/${nome}.png`);
-        return res.json({ success: true, message: "Sessão conectada", qrUrl: `/qrcodes/${nome}.png` });
+        return res.json({ success: true, message: "Sessão conectada" });
       }
 
       if (status === "PAIRING") {
         console.log(`[${new Date().toISOString()}] ℹ️ QR da sessão "${nome}" ainda válido`);
         console.log(`[${new Date().toISOString()}] 🔗 Link QR: /qrcodes/${nome}.png`);
-        return res.json({ success: true, message: "QR atual ainda válido", qrUrl: `/qrcodes/${nome}.png` });
+        return res.json({
+          success: true,
+          message: "QR atual ainda válido",
+          qrUrl: `/qrcodes/${nome}.png`,
+        });
       }
 
       // QR expirado → apagar
       fs.unlinkSync(caminhoQr);
-      console.log(`[${new Date().toISOString()}] ⚠️ QR expirado apagado: /qrcodes/${nome}.png`);
+      console.log(`[${new Date().toISOString()}] ⚠️ QR expirado apagado`);
     }
 
     // 5️⃣ Gerar novo QR apenas se não existe ou expirou
@@ -61,9 +58,13 @@ module.exports = async (req, res) => {
     console.log(`[${new Date().toISOString()}] 🔗 Link QR: /qrcodes/${nome}.png`);
 
     // 6️⃣ Retornar QR novo
-    res.json({ success: true, message: "Novo QRCode gerado", qrUrl: `/qrcodes/${nome}.png` });
+    res.json({
+      success: true,
+      message: "Novo QRCode gerado",
+      qrUrl: `/qrcodes/${nome}.png`,
+    });
 
-    // 7️⃣ Monitorar estado da sessão
+    // 7️⃣ Monitorar estado da sessão → envia dados ao servidor se conectar
     client.onStateChange(async (state) => {
       if (state === "CONNECTED") {
         try {
@@ -84,4 +85,3 @@ module.exports = async (req, res) => {
     res.json({ success: false, error: err.message });
   }
 };
-
