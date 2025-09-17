@@ -8,7 +8,7 @@ let page;
 async function initBrowser() {
   if (!browser) {
     browser = await puppeteer.launch({
-      headless: true,
+      headless: true, // Executa em background
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -26,7 +26,7 @@ async function initBrowser() {
 }
 
 /**
- * Acessa o servidor através de submeter_requisicacao.html
+ * Acessa o servidor através de submeter_requisicacao.html simulando interação humana
  * @param {string} endpoint - Ex: "listar_sessoes.php"
  * @param {object} options - { method: "POST"|"GET", data: {chave:valor} }
  */
@@ -39,28 +39,32 @@ async function acessarServidor(endpoint, options = {}) {
     console.log(`[${new Date().toISOString()}] 🔹 Acessando HTML: ${htmlUrl}`);
     await page.goto(htmlUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    // 2️⃣ Envia a requisição para o endpoint desejado via fetch
-    const resposta = await page.evaluate(async (endpoint, options) => {
-      const url = window.location.origin + "/" + endpoint;
-      if (options.method === "POST") {
-        const formData = new FormData();
-        for (const key in options.data) {
-          formData.append(key, options.data[key]);
-        }
-        const res = await fetch(url, { method: "POST", body: formData });
-        return await res.text();
-      } else {
-        const params = new URLSearchParams(options.data || {}).toString();
-        const res = await fetch(url + "?" + params);
-        return await res.text();
-      }
-    }, endpoint, options);
+    // 2️⃣ Preenche o input de nome da sessão se existir
+    if (options.data && options.data.nome) {
+      await page.evaluate((nome) => {
+        const input = document.querySelector("#nomeSessao");
+        if (input) input.value = nome;
+      }, options.data.nome);
+    }
 
-    // 3️⃣ Tenta converter em JSON
+    // 3️⃣ Clica no botão correspondente ao endpoint
+    await page.evaluate((endpoint) => {
+      const btn = Array.from(document.querySelectorAll("button")).find(b => b.onclick.toString().includes(endpoint));
+      if (btn) btn.click();
+    }, endpoint);
+
+    // 4️⃣ Captura a resposta da div#output
+    const resposta = await page.waitForFunction(
+      () => document.querySelector("#output")?.textContent || null,
+      { timeout: 30000 }
+    );
+    const texto = await resposta.jsonValue();
+
+    // 5️⃣ Tenta converter em JSON
     try {
-      return JSON.parse(resposta);
+      return JSON.parse(texto);
     } catch {
-      return { success: false, error: "Resposta não é JSON", raw: resposta };
+      return { success: false, error: "Resposta não é JSON", raw: texto };
     }
 
   } catch (err) {
@@ -84,3 +88,4 @@ async function fecharBrowser() {
 }
 
 module.exports = { acessarServidor, fecharBrowser };
+
