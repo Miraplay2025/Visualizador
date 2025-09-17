@@ -10,16 +10,21 @@ const PORT = process.env.PORT || 3000;
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// ===== Helper: logar resposta sempre =====
+function logResposta(endpoint, resposta) {
+  console.log(`[${new Date().toISOString()}] 🔹 Resposta ${endpoint}:`, resposta);
+}
+
 // ===== Listar Sessões =====
 app.get("/listar", async (req, res) => {
   try {
     console.log(`[${new Date().toISOString()}] 🔹 Listando sessões`);
     const resposta = await acessarServidor("listar_sessoes.php", { method: "POST", data: {} });
-    console.log("Resposta listar:", resposta);
-    res.json(resposta);
+    logResposta("listar_sessoes.php", resposta);
+    return res.json(resposta);
   } catch (err) {
     console.error("Erro listar sessões:", err.message);
-    res.json({ success: false, error: err.message });
+    return res.json({ success: false, error: err.message });
   }
 });
 
@@ -35,11 +40,11 @@ app.post("/criar/:nome", async (req, res) => {
       method: "POST",
       data: { nome, dados }
     });
-    console.log("Resposta criar:", resposta);
-    res.json(resposta);
+    logResposta("salvar_sessao.php", resposta);
+    return res.json(resposta);
   } catch (err) {
     console.error("Erro criar sessão:", err.message);
-    res.json({ success: false, error: err.message });
+    return res.json({ success: false, error: err.message });
   }
 });
 
@@ -54,11 +59,11 @@ app.delete("/deletar/:nome", async (req, res) => {
       method: "POST",
       data: { nome }
     });
-    console.log("Resposta deletar:", resposta);
-    res.json(resposta);
+    logResposta("deletar_sessao.php", resposta);
+    return res.json(resposta);
   } catch (err) {
     console.error("Erro deletar sessão:", err.message);
-    res.json({ success: false, error: err.message });
+    return res.json({ success: false, error: err.message });
   }
 });
 
@@ -72,8 +77,10 @@ app.get("/qrcode/:nome.png", async (req, res) => {
 
     // 1️⃣ Listar todas as sessões
     const listar = await acessarServidor("listar_sessoes.php", { method: "POST", data: {} });
+    logResposta("listar_sessoes.php", listar);
+
     if (!listar.success || !Array.isArray(listar.sessoes)) {
-      return res.json({ success: false, error: "Não foi possível listar sessões" });
+      return res.json({ success: false, error: "Não foi possível listar sessões", raw: listar });
     }
 
     // 2️⃣ Procurar a sessão desejada
@@ -84,17 +91,17 @@ app.get("/qrcode/:nome.png", async (req, res) => {
 
     // 3️⃣ Verificar status conectado
     if (sessao.conectado) {
-      return res.json({ success: true, message: "Sessão já está conectada" });
+      return res.json({ success: true, message: "Sessão já está conectada", sessao });
     }
 
     // 4️⃣ Gerar QR code via qrcode.js
     console.log(`[${new Date().toISOString()}] 🔹 Gerando QR code para sessão: ${nome}`);
     const resultado = await gerarqrcode(nome);
 
-    console.log("Resposta QR code:", resultado);
+    logResposta("qrcode.js", resultado);
 
     if (!resultado.success) {
-      return res.json({ success: false, error: resultado.error || "Erro ao gerar QR code" });
+      return res.json({ success: false, error: resultado.error || "Erro ao gerar QR code", raw: resultado });
     }
 
     // ✅ Caso qrcode.js já retorne link da imagem PNG
@@ -102,7 +109,8 @@ app.get("/qrcode/:nome.png", async (req, res) => {
       return res.json({
         success: true,
         message: "QR code gerado com sucesso",
-        qrcode: resultado.link
+        qrcode: resultado.link,
+        detalhes: resultado
       });
     }
 
@@ -117,11 +125,11 @@ app.get("/qrcode/:nome.png", async (req, res) => {
     }
 
     // Caso nenhum formato válido
-    res.json({ success: false, error: "Formato de QR code inválido" });
+    res.json({ success: false, error: "Formato de QR code inválido", raw: resultado });
 
   } catch (err) {
     console.error("Erro QR code:", err.message);
-    res.json({ success: false, error: err.message });
+    return res.json({ success: false, error: err.message });
   }
 });
 
