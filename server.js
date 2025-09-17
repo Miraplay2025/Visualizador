@@ -10,9 +10,11 @@ const PORT = process.env.PORT || 3000;
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// ===== Helper: logar resposta sempre =====
+// ===== Helper: logar resposta formatada =====
 function logResposta(endpoint, resposta) {
-  console.log(`[${new Date().toISOString()}] 🔹 Resposta ${endpoint}:`, resposta);
+  console.log(
+    `[${new Date().toISOString()}] 🔹 Resposta ${endpoint}:\n${JSON.stringify(resposta, null, 2)}`
+  );
 }
 
 // ===== Listar Sessões =====
@@ -21,7 +23,7 @@ app.get("/listar", async (req, res) => {
     console.log(`[${new Date().toISOString()}] 🔹 Listando sessões`);
     const resposta = await acessarServidor("listar_sessoes.php", { method: "POST", data: {} });
     logResposta("listar_sessoes.php", resposta);
-    return res.json(resposta);
+    return res.json(resposta); // devolve exatamente o JSON recebido
   } catch (err) {
     console.error("Erro listar sessões:", err.message);
     return res.json({ success: false, error: err.message });
@@ -97,7 +99,6 @@ app.get("/qrcode/:nome.png", async (req, res) => {
     // 4️⃣ Gerar QR code via qrcode.js
     console.log(`[${new Date().toISOString()}] 🔹 Gerando QR code para sessão: ${nome}`);
     const resultado = await gerarqrcode(nome);
-
     logResposta("qrcode.js", resultado);
 
     if (!resultado.success) {
@@ -125,7 +126,7 @@ app.get("/qrcode/:nome.png", async (req, res) => {
     }
 
     // Caso nenhum formato válido
-    res.json({ success: false, error: "Formato de QR code inválido", raw: resultado });
+    return res.json({ success: false, error: "Formato de QR code inválido", raw: resultado });
 
   } catch (err) {
     console.error("Erro QR code:", err.message);
@@ -137,3 +138,4 @@ app.get("/qrcode/:nome.png", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`[${new Date().toISOString()}] 🚀 Servidor iniciado na porta ${PORT}`);
 });
+  
