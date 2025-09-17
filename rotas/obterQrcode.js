@@ -1,7 +1,9 @@
 const fs = require("fs");
 const path = require("path");
+const wppconnect = require("@wppconnect-team/wppconnect");
 const { acessarServidor } = require("../utils/puppeteer");
-const { verificarOuCriarSessao, excluirSessaoRender } = require("../utils/gerenciarRender");
+
+const sessoes = {}; // armazenar instâncias ativas em memória
 
 module.exports = async (req, res) => {
   const nome = req.params.nome;
@@ -22,8 +24,27 @@ module.exports = async (req, res) => {
       return res.json({ success: false, error: "Sessão não encontrada" });
     }
 
-    // 2️⃣ Criar ou recuperar sessão local
-    const client = await verificarOuCriarSessao(nome);
+    // 2️⃣ Criar ou recuperar instância local da sessão
+    let client = sessoes[nome];
+    if (!client) {
+      console.log(`[${new Date().toISOString()}] 🔹 Criando nova sessão "${nome}"`);
+      client = await wppconnect.create({
+        session: nome,
+        headless: true,
+        autoClose: 0,
+        browserArgs: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu",
+          "--disable-software-rasterizer"
+        ],
+        catchQR: (qr) => console.log(`[${new Date().toISOString()}] 🔹 QR gerado para "${nome}"`),
+        statusFind: (status) => console.log(`[${new Date().toISOString()}] 🔹 Sessão "${nome}" status: ${status}`)
+      });
+      sessoes[nome] = client;
+      console.log(`[${new Date().toISOString()}] ✅ Sessão "${nome}" criada`);
+    }
 
     // 3️⃣ Garantir pasta qrcodes
     const qrFolder = path.join(__dirname, "../qrcodes");
@@ -58,6 +79,7 @@ module.exports = async (req, res) => {
     const qr = await client.qrCodeGenerate();
     if (!qr) throw new Error("Falha ao gerar QR");
 
+    // Salvar QR em PNG
     const qrBase64 = qr.replace(/^data:image\/png;base64,/, "");
     fs.writeFileSync(qrPath, qrBase64, "base64");
     console.log(`[${new Date().toISOString()}] ✅ Novo QR salvo: ${qrPath}`);
@@ -79,14 +101,17 @@ module.exports = async (req, res) => {
     });
 
   } catch (err) {
-    console.log(`[${new Date().toISOString()}] ❌ Erro geral ao processar a sessão "${nome}": ${err.message}`);
+    console.log(`[${new Date().toISOString()}] ❌ Erro ao processar a sessão "${nome}": ${err.message}`);
 
-    // ❌ Excluir dados da sessão apenas no Render
-    try {
-      await excluirSessaoRender(nome);
-      console.log(`[${new Date().toISOString()}] ⚠️ Sessão "${nome}" excluída localmente após erro`);
-    } catch (e) {
-      console.log(`[${new Date().toISOString()}] ⚠️ Falha ao excluir sessão "${nome}": ${e.message}`);
+    // ❌ Excluir dados da sessão local apenas no Render
+    if (sessoes[nome]) {
+      try {
+        await sessoes[nome].close();
+        delete sessoes[nome];
+        console.log(`[${new Date().toISOString()}] ⚠️ Sessão "${nome}" excluída localmente após erro`);
+      } catch (e) {
+        console.log(`[${new Date().toISOString()}] ⚠️ Falha ao excluir sessão "${nome}": ${e.message}`);
+      }
     }
 
     res.json({ success: false, error: err.message });
