@@ -5,9 +5,6 @@ const BASE_URL = "https://livestream.ct.ws/Web/";
 let browser;
 let page;
 
-/**
- * Inicializa o browser se ainda não foi criado
- */
 async function initBrowser() {
   if (!browser) {
     browser = await puppeteer.launch({
@@ -21,63 +18,57 @@ async function initBrowser() {
       ],
       ignoreHTTPSErrors: true,
       defaultViewport: null,
-      // 🔴 evita que o browser feche sozinho
-      autoClose: 0,
+      autoClose: 0, // 🔴 evita que o browser feche sozinho
     });
-
     page = await browser.newPage();
-    page.setDefaultTimeout(30000); // timeout padrão 30s
+    page.setDefaultTimeout(30000);
   }
 }
 
 /**
- * Acessa servidor PHP usando Puppeteer, resolvendo JS injetado
+ * Acessa o servidor através de submeter_requisicacao.html
  * @param {string} endpoint - Ex: "listar_sessoes.php"
  * @param {object} options - { method: "POST"|"GET", data: {chave:valor} }
  */
 async function acessarServidor(endpoint, options = {}) {
   try {
     await initBrowser();
-    const url = BASE_URL + endpoint;
 
-    console.log(`[${new Date().toISOString()}] 🔹 Acessando servidor: ${url}`);
+    // 1️⃣ Acessa a página HTML
+    const htmlUrl = BASE_URL + "submeter_requisicacao.html";
+    console.log(`[${new Date().toISOString()}] 🔹 Acessando HTML: ${htmlUrl}`);
+    await page.goto(htmlUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });
-
-    // ⬅️ espera apenas 5 segundos para JS injetado terminar
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-
-    if (options.method === "POST") {
-      const resposta = await page.evaluate(async (dados) => {
+    // 2️⃣ Envia a requisição para o endpoint desejado via fetch
+    const resposta = await page.evaluate(async (endpoint, options) => {
+      const url = window.location.origin + "/" + endpoint;
+      if (options.method === "POST") {
         const formData = new FormData();
-        for (const k in dados) formData.append(k, dados[k]);
-        const r = await fetch(window.location.href, { method: "POST", body: formData });
-        return await r.text();
-      }, options.data);
+        for (const key in options.data) {
+          formData.append(key, options.data[key]);
+        }
+        const res = await fetch(url, { method: "POST", body: formData });
+        return await res.text();
+      } else {
+        const params = new URLSearchParams(options.data || {}).toString();
+        const res = await fetch(url + "?" + params);
+        return await res.text();
+      }
+    }, endpoint, options);
 
-      try {
-        return JSON.parse(resposta);
-      } catch {
-        return { success: false, error: "Resposta não é JSON", raw: resposta };
-      }
-    } else {
-      const conteudo = await page.evaluate(() => document.body.innerText);
-      try {
-        return JSON.parse(conteudo);
-      } catch {
-        return { success: false, error: "Resposta não é JSON", raw: conteudo };
-      }
+    // 3️⃣ Tenta converter em JSON
+    try {
+      return JSON.parse(resposta);
+    } catch {
+      return { success: false, error: "Resposta não é JSON", raw: resposta };
     }
+
   } catch (err) {
     console.error(`[${new Date().toISOString()}] ❌ Erro acessarServidor(${endpoint}): ${err.message}`);
-    // Evita congelamento do Render retornando sempre JSON, mesmo em erro
     return { success: false, error: err.message };
   }
 }
 
-/**
- * Fecha o browser manualmente, se necessário
- */
 async function fecharBrowser() {
   if (browser) {
     try {
