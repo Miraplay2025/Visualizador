@@ -1,18 +1,14 @@
+// server.js
 const express = require("express");
 const bodyParser = require("body-parser");
-const cors = require("cors");
 const { acessarServidor } = require("./utils/puppeteer"); // PHP interactions
-const { gerarqrcode } = require("./wppconnect/qrcode.js"); // QR code generator
+const { gerarqrcode } = require("./wppconnect/qrcode.js");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ===== Middleware =====
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-
-// ✅ Habilita CORS para qualquer origem (browser fetch)
-app.use(cors());
 
 // ===== Helper: logar resposta formatada =====
 function logResposta(endpoint, resposta) {
@@ -41,13 +37,19 @@ app.post("/criar/:nome", async (req, res) => {
 
   try {
     console.log(`[${new Date().toISOString()}] 🔹 Criando sessão: ${nome}`);
+
+    // Cria o objeto de dados inicial da sessão
     const dados = JSON.stringify({ conectado: false });
+
+    // Passa nome e dados para o PHP
     const resposta = await acessarServidor("salvar_sessao.php", {
       method: "POST",
       data: { nome, dados }
     });
+
     logResposta("salvar_sessao.php", resposta);
     return res.json(resposta);
+
   } catch (err) {
     console.error("Erro criar sessão:", err.message);
     return res.json({ success: false, error: err.message });
@@ -81,7 +83,6 @@ app.get("/qrcode/:nome.png", async (req, res) => {
   try {
     console.log(`[${new Date().toISOString()}] 🔹 Verificando sessão: ${nome}`);
 
-    // Listar todas as sessões
     const listar = await acessarServidor("listar_sessoes.php", { method: "POST", data: {} });
     logResposta("listar_sessoes.php", listar);
 
@@ -91,10 +92,7 @@ app.get("/qrcode/:nome.png", async (req, res) => {
 
     const sessao = listar.sessoes.find(s => s.nome === nome);
     if (!sessao) return res.json({ success: false, error: "Sessão não encontrada" });
-
-    if (sessao.conectado) {
-      return res.json({ success: true, message: "Sessão já está conectada", sessao });
-    }
+    if (sessao.conectado) return res.json({ success: true, message: "Sessão já conectada", sessao });
 
     console.log(`[${new Date().toISOString()}] 🔹 Gerando QR code para sessão: ${nome}`);
     const resultado = await gerarqrcode(nome);
@@ -103,19 +101,11 @@ app.get("/qrcode/:nome.png", async (req, res) => {
     if (!resultado.success) return res.json({ success: false, error: resultado.error || "Erro ao gerar QR code", raw: resultado });
 
     if (resultado.link && resultado.link.endsWith(".png")) {
-      return res.json({
-        success: true,
-        message: "QR code gerado com sucesso",
-        qrcode: resultado.link,
-        detalhes: resultado
-      });
+      return res.json({ success: true, message: "QR code gerado com sucesso", qrcode: resultado.link, detalhes: resultado });
     }
 
     if (resultado.qrcode) {
-      const imgBuffer = Buffer.isBuffer(resultado.qrcode)
-        ? resultado.qrcode
-        : Buffer.from(resultado.qrcode, "base64");
-
+      const imgBuffer = Buffer.isBuffer(resultado.qrcode) ? resultado.qrcode : Buffer.from(resultado.qrcode, "base64");
       res.writeHead(200, { "Content-Type": "image/png" });
       return res.end(imgBuffer);
     }
