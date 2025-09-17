@@ -1,12 +1,4 @@
 // wppconnect/qrcode.js
-/**
- * Gerador e monitor de QR Code para sessões WPPConnect
- * - Gera QR novo caso não exista ou esteja expirado
- * - Monitora status até conectar
- * - Envia tokens ao servidor PHP atualizar_sessao.php
- * - Limpa tudo após finalizar (sucesso ou erro)
- */
-
 const wppconnect = require("@wppconnect-team/wppconnect");
 const fs = require("fs");
 const path = require("path");
@@ -15,106 +7,47 @@ const { acessarServidor } = require("../utils/puppeteer");
 const QR_PATH = path.join(__dirname, "qrcodes");
 if (!fs.existsSync(QR_PATH)) fs.mkdirSync(QR_PATH, { recursive: true });
 
-// Lock de sessões em andamento
 const sessionLocks = new Map();
 
-/**
- * Função para gerar QR Code de uma sessão
- * @param {string} sessionName
- */
 async function gerarqrcode(sessionName) {
   if (sessionLocks.get(sessionName)) {
     return { success: false, error: "Já existe uma requisição em andamento para essa sessão" };
   }
   sessionLocks.set(sessionName, true);
 
-  let client;
   const qrFile = path.join(QR_PATH, `${sessionName}.png`);
+  let client;
 
   try {
-    // 🔎 Verifica se já existe instância
-    const existingSessions = await wppconnect.listSessions();
-    const existing = existingSessions.find(s => s.session === sessionName);
-
-    if (existing) {
-      console.log(`[${new Date().toISOString()}] Sessão ${sessionName} já existe`);
-
-      client = await wppconnect.getSession(sessionName);
-
-      if (client) {
-        const status = await client.getStatus();
-
-        if (status.connected) {
-          sessionLocks.delete(sessionName);
-          return { success: true, message: "Essa sessão já está conectada" };
-        }
-
-        // QR expirado ou inexistente → gerar novo
-        if (!status.qr || status.qr === "" || status.qrExpired) {
-          if (fs.existsSync(qrFile)) fs.unlinkSync(qrFile);
-          return await gerarNovoQr(client, sessionName, qrFile);
-        }
-
-        // QR válido → retornar link
-        sessionLocks.delete(sessionName);
-        return { success: true, message: "QR code atual ainda válido", link: `/wppconnect/qrcodes/${sessionName}.png` };
-      }
-    }
-
-    // 🆕 Não existe instância → criar
+    // Cria a sessão ou conecta se já existir
     client = await wppconnect.create({
       session: sessionName,
       headless: true,
       autoClose: 0,
-      browserArgs: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-      ],
       puppeteerOptions: { headless: true },
-      qrCodeData: false,
+      browserArgs: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+      catchQR: async (qrBase64) => {
+        // Salva QR como PNG
+        const buffer = Buffer.from(qrBase64, "base64");
+        fs.writeFileSync(qrFile, buffer);
+        console.log(`[${new Date().toISOString()}] QR code salvo: ${qrFile}`);
+      },
+      statusFind: (status) => {
+        console.log(`[${new Date().toISOString()}] Status ${sessionName}: ${status}`);
+      },
     });
 
-    if (fs.existsSync(qrFile)) fs.unlinkSync(qrFile);
-    return await gerarNovoQr(client, sessionName, qrFile);
+    // Verifica se já está conectado
+    const status = await client.getStatus();
+    if (status.connected) {
+      sessionLocks.delete(sessionName);
+      console.log(`[${new Date().toISOString()}] Sessão ${sessionName} já está conectada`);
+      return { success: true, message: "Sessão já conectada", link: fs.existsSync(qrFile) ? `/wppconnect/qrcodes/${sessionName}.png` : null };
+    }
 
-  } catch (err) {
-    console.error(`[${new Date().toISOString()}] Erro gerarqrcode:`, err.message);
-    await limparSessao(client, qrFile, sessionName);
-    sessionLocks.delete(sessionName);
-    return { success: false, error: err.message };
-  }
-}
-
-/**
- * Função auxiliar para gerar novo QR e monitorar conexão
- */
-async function gerarNovoQr(client, sessionName, qrFile) {
-  try {
-    const qrCodeBase64 = await new Promise((resolve, reject) => {
-      let resolved = false;
-
-      client.onQRCode((base64Qr) => {
-        if (!resolved) {
-          resolved = true;
-          resolve(base64Qr);
-        }
-      });
-
-      setTimeout(() => {
-        if (!resolved) reject(new Error("Tempo esgotado para geração do QR code"));
-      }, 30000);
-    });
-
-    // Salva QR como PNG
-    const qrBuffer = Buffer.from(qrCodeBase64, "base64");
-    fs.writeFileSync(qrFile, qrBuffer);
-    console.log(`QR code salvo em: ${qrFile}`);
-
-    // Monitora até conectar
+    // QR expirado ou não existente → gerar novo
     client.onReady(async () => {
       console.log(`[${new Date().toISOString()}] Sessão conectada: ${sessionName}`);
-
       try {
         const sessionData = await client.getSessionToken();
         await acessarServidor("atualizar_sessao.php", {
@@ -128,26 +61,25 @@ async function gerarNovoQr(client, sessionName, qrFile) {
         console.log("Sessão atualizada no servidor com sucesso");
       } catch (err) {
         console.error("Erro ao atualizar sessão no servidor:", err.message);
+      } finally {
+        await limparSessao(client, qrFile, sessionName);
       }
-
-      await limparSessao(client, qrFile, sessionName);
-      sessionLocks.delete(sessionName);
     });
 
+    // Retorna link do QR code
     const qrLink = `/wppconnect/qrcodes/${sessionName}.png`;
-    return { success: true, qrcode: qrBuffer, link: qrLink };
+    sessionLocks.delete(sessionName);
+    return { success: true, link: qrLink };
 
   } catch (err) {
-    console.error(`[${new Date().toISOString()}] Erro gerarNovoQr:`, err.message);
-    await limparSessao(client, qrFile, sessionName);
+    console.error(`[${new Date().toISOString()}] Erro gerarqrcode:`, err.message);
+    if (client) await client.close();
+    if (fs.existsSync(qrFile)) fs.unlinkSync(qrFile);
     sessionLocks.delete(sessionName);
     return { success: false, error: err.message };
   }
 }
 
-/**
- * Limpeza da sessão e QR
- */
 async function limparSessao(client, qrFile, sessionName) {
   try {
     if (client) {
@@ -155,9 +87,9 @@ async function limparSessao(client, qrFile, sessionName) {
       await client.close();
     }
     if (fs.existsSync(qrFile)) fs.unlinkSync(qrFile);
-    console.log(`Sessão ${sessionName} e QR removidos`);
+    console.log(`[${new Date().toISOString()}] Sessão ${sessionName} e QR removidos`);
   } catch (err) {
-    console.error(`Erro ao limpar sessão ${sessionName}:`, err.message);
+    console.error(`[${new Date().toISOString()}] Erro ao limpar sessão ${sessionName}:`, err.message);
   }
 }
 
