@@ -65,6 +65,11 @@ module.exports = async (req, res) => {
           data: { nome, dados: JSON.stringify({ conectado: true, tokens }) },
         });
 
+        // Limpar sessão e QR após resposta
+        await client.close().catch(() => {});
+        delete sessoes[nome];
+        fs.unlinkSync(qrPath);
+
         return res.json({ success: true, message: "Sessão já conectada", qrcode: `/qrcodes/${nome}.png` });
       } else if (estado === "PAIRING") {
         console.log(`[${new Date().toISOString()}] 🔹 QR ainda válido para "${nome}"`);
@@ -103,17 +108,17 @@ module.exports = async (req, res) => {
   } catch (err) {
     console.log(`[${new Date().toISOString()}] ❌ Erro ao processar a sessão "${nome}": ${err.message}`);
 
-    // ❌ Excluir dados da sessão local apenas no Render
+    // ❌ Excluir sessão e QR local
     if (sessoes[nome]) {
       try {
         await sessoes[nome].close();
-        delete sessoes[nome];
-        console.log(`[${new Date().toISOString()}] ⚠️ Sessão "${nome}" excluída localmente após erro`);
-      } catch (e) {
-        console.log(`[${new Date().toISOString()}] ⚠️ Falha ao excluir sessão "${nome}": ${e.message}`);
-      }
+      } catch {}
+      delete sessoes[nome];
+    }
+    if (fs.existsSync(path.join(__dirname, "../qrcodes", `${nome}.png`))) {
+      fs.unlinkSync(path.join(__dirname, "../qrcodes", `${nome}.png`));
     }
 
-    res.json({ success: false, error: err.message });
+    return res.json({ success: false, error: err.message });
   }
 };
