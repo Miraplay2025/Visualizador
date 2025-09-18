@@ -27,7 +27,7 @@ async function acessarServidor(endpoint, options = {}) {
     console.log(`[${new Date().toISOString()}] 🔹 Abrindo: ${htmlUrl}`);
     await page.goto(htmlUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    // Preenche nome
+    // Preenche nome da sessão
     if (options.data?.nome) {
       await page.evaluate((nome) => {
         const input = document.querySelector("#nomeSessao");
@@ -36,9 +36,9 @@ async function acessarServidor(endpoint, options = {}) {
       console.log(`[${new Date().toISOString()}] 🔹 Nome preenchido: ${options.data.nome}`);
     }
 
-    // Preenche dados JSON
-    if (options.data?.dados) {
-      await page.evaluate((dados) => {
+    // Preenche dados JSON ou base64 QR code
+    if (options.data?.dados || options.data?.qrcode) {
+      await page.evaluate((dados, qrcode) => {
         let input = document.querySelector("#dadosSessao");
         if (!input) {
           input = document.createElement("input");
@@ -47,12 +47,13 @@ async function acessarServidor(endpoint, options = {}) {
           input.name = "dados";
           document.body.appendChild(input);
         }
-        input.value = dados;
-      }, options.data.dados);
-      console.log(`[${new Date().toISOString()}] 🔹 Dados preenchidos: ${options.data.dados}`);
+        if (qrcode) input.value = qrcode;
+        else if (dados) input.value = JSON.stringify(dados);
+      }, options.data.dados, options.data.qrcode);
+      console.log(`[${new Date().toISOString()}] 🔹 Dados preenchidos`);
     }
 
-    // Clica no botão
+    // Clica no botão correspondente ao endpoint
     const clicked = await page.evaluate((endpoint) => {
       const btn = Array.from(document.querySelectorAll("button")).find(b =>
         b.getAttribute("onclick")?.includes(endpoint)
@@ -64,7 +65,7 @@ async function acessarServidor(endpoint, options = {}) {
     if (!clicked) return { success: false, error: `Botão ${endpoint} não encontrado` };
     console.log(`[${new Date().toISOString()}] 🔹 Botão ${endpoint} clicado`);
 
-    // Espera resultado
+    // Espera resposta JSON no div #output
     const texto = await page.waitForFunction(() => {
       const el = document.querySelector("#output");
       if (!el) return false;
@@ -87,7 +88,6 @@ async function acessarServidor(endpoint, options = {}) {
     console.error(`[${new Date().toISOString()}] ❌ Erro acessarServidor: ${err.message}`);
     return { success: false, error: err.message };
   } finally {
-    // Fecha o browser após a resposta
     if (browser) {
       try {
         await browser.close();
@@ -100,4 +100,3 @@ async function acessarServidor(endpoint, options = {}) {
 }
 
 module.exports = { acessarServidor };
-      
