@@ -1,124 +1,25 @@
-// server.js
 const express = require("express");
-const bodyParser = require("body-parser");
-const { acessarServidor } = require("./utils/puppeteer"); // PHP interactions
-const { gerarqrcode } = require("./wppconnect/qrcode.js");
+const cors = require("cors");
+
+const listar = require("./endpoints/listar");
+const criar = require("./endpoints/criar");
+const deletar = require("./endpoints/deletar");
+const qrcode = require("./endpoints/qrcode");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+// Middlewares
+app.use(cors()); // Habilita CORS para qualquer origem
+app.use(express.json());
 
-// ===== Helper: logar resposta formatada =====
-function logResposta(endpoint, resposta) {
-  console.log(
-    `[${new Date().toISOString()}] 🔹 Resposta ${endpoint}:\n${JSON.stringify(resposta, null, 2)}`
-  );
-}
+// Rotas
+app.get("/listar", listar);
+app.post("/criar/:nome", criar);
+app.delete("/deletar/:nome", deletar);
+app.get("/qrcode/:nome.png", qrcode);
 
-// ===== Listar Sessões =====
-app.get("/listar", async (req, res) => {
-  try {
-    console.log(`[${new Date().toISOString()}] 🔹 Listando sessões`);
-    const resposta = await acessarServidor("listar_sessoes.php", { method: "POST", data: {} });
-    logResposta("listar_sessoes.php", resposta);
-    return res.json(resposta);
-  } catch (err) {
-    console.error("Erro listar sessões:", err.message);
-    return res.json({ success: false, error: err.message });
-  }
-});
-
-// ===== Criar Sessão =====
-app.post("/criar/:nome", async (req, res) => {
-  const nome = req.params.nome;
-  if (!nome) return res.json({ success: false, error: "Nome da sessão é obrigatório" });
-
-  try {
-    console.log(`[${new Date().toISOString()}] 🔹 Criando sessão: ${nome}`);
-
-    // Cria o objeto de dados inicial da sessão
-    const dados = JSON.stringify({ conectado: false });
-
-    // Passa nome e dados para o PHP
-    const resposta = await acessarServidor("salvar_sessao.php", {
-      method: "POST",
-      data: { nome, dados }
-    });
-
-    logResposta("salvar_sessao.php", resposta);
-    return res.json(resposta);
-
-  } catch (err) {
-    console.error("Erro criar sessão:", err.message);
-    return res.json({ success: false, error: err.message });
-  }
-});
-
-// ===== Deletar Sessão =====
-app.delete("/deletar/:nome", async (req, res) => {
-  const nome = req.params.nome;
-  if (!nome) return res.json({ success: false, error: "Nome da sessão é obrigatório" });
-
-  try {
-    console.log(`[${new Date().toISOString()}] 🔹 Deletando sessão: ${nome}`);
-    const resposta = await acessarServidor("deletar_sessao.php", {
-      method: "POST",
-      data: { nome }
-    });
-    logResposta("deletar_sessao.php", resposta);
-    return res.json(resposta);
-  } catch (err) {
-    console.error("Erro deletar sessão:", err.message);
-    return res.json({ success: false, error: err.message });
-  }
-});
-
-// ===== Gerar QR Code =====
-app.get("/qrcode/:nome.png", async (req, res) => {
-  const nome = req.params.nome.replace(".png", "");
-  if (!nome) return res.json({ success: false, error: "Nome da sessão é obrigatório" });
-
-  try {
-    console.log(`[${new Date().toISOString()}] 🔹 Verificando sessão: ${nome}`);
-
-    const listar = await acessarServidor("listar_sessoes.php", { method: "POST", data: {} });
-    logResposta("listar_sessoes.php", listar);
-
-    if (!listar.success || !Array.isArray(listar.sessoes)) {
-      return res.json({ success: false, error: "Não foi possível listar sessões", raw: listar });
-    }
-
-    const sessao = listar.sessoes.find(s => s.nome === nome);
-    if (!sessao) return res.json({ success: false, error: "Sessão não encontrada" });
-    if (sessao.conectado) return res.json({ success: true, message: "Sessão já conectada", sessao });
-
-    console.log(`[${new Date().toISOString()}] 🔹 Gerando QR code para sessão: ${nome}`);
-    const resultado = await gerarqrcode(nome);
-    logResposta("qrcode.js", resultado);
-
-    if (!resultado.success) return res.json({ success: false, error: resultado.error || "Erro ao gerar QR code", raw: resultado });
-
-    if (resultado.link && resultado.link.endsWith(".png")) {
-      return res.json({ success: true, message: "QR code gerado com sucesso", qrcode: resultado.link, detalhes: resultado });
-    }
-
-    if (resultado.qrcode) {
-      const imgBuffer = Buffer.isBuffer(resultado.qrcode) ? resultado.qrcode : Buffer.from(resultado.qrcode, "base64");
-      res.writeHead(200, { "Content-Type": "image/png" });
-      return res.end(imgBuffer);
-    }
-
-    return res.json({ success: false, error: "Formato de QR code inválido", raw: resultado });
-
-  } catch (err) {
-    console.error("Erro QR code:", err.message);
-    return res.json({ success: false, error: err.message });
-  }
-});
-
-// ===== Start Server =====
+// Inicia servidor
 app.listen(PORT, () => {
-  console.log(`[${new Date().toISOString()}] 🚀 Servidor iniciado na porta ${PORT}`);
+  console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
 });
