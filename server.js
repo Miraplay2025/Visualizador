@@ -13,6 +13,13 @@ const PORT = process.env.PORT || 3000;
 app.use(cors()); // Habilita CORS para qualquer origem
 app.use(express.json());
 
+// Middleware para log de requisições
+app.use((req, res, next) => {
+  const nomeSessao = req.params?.nome || req.body?.nome || "-";
+  console.log(`[${new Date().toISOString()}] 🔹 Requisição recebida: ${req.method} ${req.path} | Sessão: ${nomeSessao}`);
+  next();
+});
+
 // Rotas
 app.get("/listar", listar);
 app.post("/criar/:nome", criar);
