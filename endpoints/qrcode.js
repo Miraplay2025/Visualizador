@@ -9,6 +9,9 @@ const locks = new Set(); // Evita concorrência
 const qrcodeDir = path.join(__dirname, "../qrcodes");
 if (!fs.existsSync(qrcodeDir)) fs.mkdirSync(qrcodeDir, { recursive: true });
 
+const tokensDir = path.join(__dirname, "../tokens");
+if (!fs.existsSync(tokensDir)) fs.mkdirSync(tokensDir, { recursive: true });
+
 // Função para limpar sessão e QRCode
 function limparSessao(nome, client) {
   try {
@@ -74,8 +77,8 @@ module.exports = async (req, res) => {
           session: nome,
           puppeteerOptions: {
             headless: true,
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
-            userDataDir: `/app/tokens/${nome}-${Date.now()}`,
+            args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+            userDataDir: path.join(tokensDir, `${nome}-${Date.now()}`), // ✅ Corrigido para não usar /app
           },
           autoClose: 0,
           catchQR: async (base64Qr, asciiQR, attempt) => {
@@ -85,7 +88,6 @@ module.exports = async (req, res) => {
               const qrBase64Final = fs.readFileSync(qrcodePath, { encoding: "base64" });
               console.log(`[${nome}] 🔹 QRCode gerado (tentativa ${attempt})`);
 
-              // Retorna QRCode apenas se for a primeira geração ou se o QR anterior expirou
               resolve(`data:image/png;base64,${qrBase64Final}`);
             } catch (err) {
               reject(err);
@@ -108,7 +110,7 @@ module.exports = async (req, res) => {
               }
             }
 
-            // Se QRCode expirou, limpa QR antigo e gera novo
+            // Se QRCode expirou, limpa QR antigo
             if (statusSession === "QRCODE_EXPIRING" || statusSession === "TIMEOUT") {
               if (fs.existsSync(qrcodePath)) fs.unlinkSync(qrcodePath);
               console.log(`[${nome}] ⚠ QRCode expirou, aguardando novo QR...`);
