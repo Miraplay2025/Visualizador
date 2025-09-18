@@ -59,8 +59,9 @@ module.exports = async (req, res) => {
         return res.json({ success: true, message: "Sessão já conectada" });
       }
       if (status === "QRCODE" && fs.existsSync(qrcodePath)) {
+        const qrBase64 = fs.readFileSync(qrcodePath, { encoding: "base64" });
         locks.delete(nome);
-        return res.json({ success: true, message: "QR code ainda válido", qrcode: `/qrcode/${nome}.png` });
+        return res.json({ success: true, message: "QR code ainda válido", qrcode: `data:image/png;base64,${qrBase64}` });
       }
     }
 
@@ -80,8 +81,9 @@ module.exports = async (req, res) => {
           catchQR: (base64Qr) => {
             try {
               fs.writeFileSync(qrcodePath, base64Qr.split(",")[1], "base64");
+              const qrBase64Final = fs.readFileSync(qrcodePath, { encoding: "base64" });
               console.log(`[${nome}] 🔹 QRCode gerado em ${qrcodePath}`);
-              resolve(`/qrcode/${nome}.png`);
+              resolve(`data:image/png;base64,${qrBase64Final}`);
             } catch (err) {
               reject(err);
             }
@@ -110,13 +112,13 @@ module.exports = async (req, res) => {
         .catch((err) => reject(err));
     });
 
-    const qrCodePathFinal = await qrCodePromise;
+    const qrCodeBase64 = await qrCodePromise;
     locks.delete(nome);
 
     return res.json({
       success: true,
       message: "Nova sessão criada. QRCode disponível",
-      qrcode: qrCodePathFinal,
+      qrcode: qrCodeBase64,
     });
   } catch (err) {
     console.error(`[${new Date().toISOString()}] ❌ Erro em qrcode.js:`, err.message);
@@ -125,3 +127,4 @@ module.exports = async (req, res) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 };
+          
