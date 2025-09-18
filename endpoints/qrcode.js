@@ -3,7 +3,7 @@ const path = require("path");
 const express = require("express");
 const bodyParser = require("body-parser");
 const { createClient } = require("@wppconnect-team/wppconnect");
-const { acessarServidor } = require("./utils/puppeteer");
+const { acessarServidor } = require("../utils/puppeteer");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
