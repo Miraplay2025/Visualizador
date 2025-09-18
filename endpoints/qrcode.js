@@ -3,13 +3,13 @@ const path = require("path");
 const wppconnect = require("@wppconnect-team/wppconnect");
 const { acessarServidor } = require("../utils/puppeteer");
 
-const sessions = new Map(); // Map para instâncias de cada sessão
-const locks = new Set(); // Set para evitar execuções concorrentes
+const sessions = new Map(); // Instâncias por sessão
+const locks = new Set(); // Evita concorrência
 
 const qrcodeDir = path.join(__dirname, "../qrcodes");
 if (!fs.existsSync(qrcodeDir)) fs.mkdirSync(qrcodeDir, { recursive: true });
 
-// Função auxiliar para limpar sessão e arquivos temporários
+// Função para limpar sessão e QRCode
 function limparSessao(nome, client) {
   try {
     if (sessions.has(nome)) sessions.delete(nome);
@@ -27,7 +27,7 @@ function limparSessao(nome, client) {
   }
 }
 
-// Função principal para criar ou retornar QR code da sessão
+// Função principal
 module.exports = async (req, res) => {
   const { nome } = req.params;
 
@@ -37,7 +37,7 @@ module.exports = async (req, res) => {
   locks.add(nome);
 
   try {
-    // 1️⃣ Verifica no servidor se a sessão existe
+    // Verifica no servidor se a sessão existe
     const respostaListar = await acessarServidor("listar_sessoes.php");
     const lista = Array.isArray(respostaListar.sessoes) ? respostaListar.sessoes : [];
     const existe = lista.find((s) => s.nome === nome);
@@ -48,9 +48,9 @@ module.exports = async (req, res) => {
     }
 
     let client = sessions.get(nome);
-
-    // 2️⃣ Reutiliza instância existente se QR code ainda válido
     const qrcodePath = path.join(qrcodeDir, `${nome}.png`);
+
+    // Reutiliza QRCode existente se ainda válido
     if (client) {
       const status = await client.getConnectionState();
       if (status === "CONNECTED") {
@@ -65,9 +65,9 @@ module.exports = async (req, res) => {
       }
     }
 
-    // 3️⃣ Cria nova instância e garante QR code
     console.log(`[${nome}] 🔹 Criando nova instância...`);
 
+    // Cria instância WPPConnect
     const qrCodePromise = new Promise((resolve, reject) => {
       wppconnect
         .create({
@@ -75,14 +75,17 @@ module.exports = async (req, res) => {
           puppeteerOptions: {
             headless: true,
             args: ["--no-sandbox", "--disable-setuid-sandbox"],
-            userDataDir: `/app/tokens/${nome}-${Date.now()}`, // Pasta única para evitar conflito
+            userDataDir: `/app/tokens/${nome}-${Date.now()}`,
           },
-          autoClose: 0, // Não fecha antes do scan
-          catchQR: (base64Qr) => {
+          autoClose: 0,
+          catchQR: async (base64Qr, asciiQR, attempt) => {
             try {
+              // Salva QRCode
               fs.writeFileSync(qrcodePath, base64Qr.split(",")[1], "base64");
               const qrBase64Final = fs.readFileSync(qrcodePath, { encoding: "base64" });
-              console.log(`[${nome}] 🔹 QRCode gerado em ${qrcodePath}`);
+              console.log(`[${nome}] 🔹 QRCode gerado (tentativa ${attempt})`);
+
+              // Retorna QRCode apenas se for a primeira geração ou se o QR anterior expirou
               resolve(`data:image/png;base64,${qrBase64Final}`);
             } catch (err) {
               reject(err);
@@ -91,6 +94,7 @@ module.exports = async (req, res) => {
           statusFind: async (statusSession) => {
             console.log(`[${nome}] 🔹 Status atualizado: ${statusSession}`);
 
+            // Se sessão conectou
             if (statusSession === "CONNECTED") {
               try {
                 const tokens = await client.getSessionTokenBrowser();
@@ -102,6 +106,12 @@ module.exports = async (req, res) => {
                 console.error(`[${nome}] ❌ Erro ao atualizar sessão conectada:`, err.message);
                 limparSessao(nome, client);
               }
+            }
+
+            // Se QRCode expirou, limpa QR antigo e gera novo
+            if (statusSession === "QRCODE_EXPIRING" || statusSession === "TIMEOUT") {
+              if (fs.existsSync(qrcodePath)) fs.unlinkSync(qrcodePath);
+              console.log(`[${nome}] ⚠ QRCode expirou, aguardando novo QR...`);
             }
           },
         })
@@ -127,4 +137,3 @@ module.exports = async (req, res) => {
     return res.status(500).json({ success: false, error: err.message });
   }
 };
-          
