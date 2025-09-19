@@ -76,7 +76,7 @@ function startMonitor(nome, client) {
   });
 }
 
-// Timeout de 5 minutos apenas se não gerar QR ou não houver resposta do servidor
+// Timeout de 5 minutos apenas se QR não for gerado ou servidor não responder
 function setupQrTimeout(nome) {
   if (sessions[nome]?.timeout) clearTimeout(sessions[nome].timeout);
   sessions[nome].timeout = setTimeout(() => {
