@@ -4,212 +4,142 @@ const path = require("path");
 const wppconnect = require("@wppconnect-team/wppconnect");
 const { acessarServidor } = require("../utils/puppeteer");
 
-// Sessões e locks
-const sessions = {};
-const locks = {};
+// Armazena sessões ativas e status do QR Code
+const sessions = {}; // { nome: { inProgress: bool, qrStatus: "pending/connected", client, qrCount } }
 
-// Cores no console
-const colors = {
-  reset: "\x1b[0m",
-  red: "\x1b[31m",
-  green: "\x1b[32m",
-  yellow: "\x1b[33m",
-};
-
-// Função de log padronizada
-function log(msg, type = "info") {
-  let color = colors.reset;
-  if (type === "success") color = colors.green;
-  if (type === "warn") color = colors.yellow;
-  if (type === "error") color = colors.red;
-  console.log(`${color}[${new Date().toISOString()}] 🔹 [QR] ${msg}${colors.reset}`);
-}
-
-// Limpa e fecha sessão
-function cleanupSession(nome) {
-  if (sessions[nome]) {
-    try {
-      sessions[nome].client?.close();
-    } catch {}
-    delete sessions[nome];
-  }
-  delete locks[nome];
-  log(`Sessão "${nome}" removida/limpa`, "warn");
-}
-
-// Monitoramento de status da sessão
-function startMonitor(nome, client) {
-  client.removeAllListeners("stateChange");
-
-  client.onStateChange(async (status) => {
-    log(`Status da sessão "${nome}": ${status}`);
-    try {
-      if (status === "CONNECTED" || status === "isLogged") {
-        sessions[nome].qrStatus = "connected";
-
-        const tokens = await client.getSessionTokenBrowser();
-        const resposta = await acessarServidor("atualizar_sessao.php", {
-          method: "POST",
-          data: { nome, dados: JSON.stringify({ conectado: true, tokens }) },
-        });
-
-        if (!resposta?.success) {
-          throw new Error("Servidor não respondeu corretamente ao atualizar sessão");
-        }
-
-        log(`Sessão "${nome}" conectada com sucesso`, "success");
-      }
-
-      if (status === "qrReadSuccess") {
-        log(`QR da sessão "${nome}" escaneado, aguardando conexão...`, "warn");
-      }
-
-      if (status === "qrReadFail" || status === "qrCodeSessionInvalid") {
-        sessions[nome].qrStatus = "expired";
-        log(`QR da sessão "${nome}" expirou/é inválido`, "error");
-        regenerateQr(nome);
-      }
-    } catch (err) {
-      log(`❌ Erro monitorando status: ${err.message}`, "error");
-      cleanupSession(nome);
-    }
-  });
-}
-
-// Timeout de 5 minutos apenas se QR não for gerado ou servidor não responder
-function setupQrTimeout(nome) {
-  if (sessions[nome]?.timeout) clearTimeout(sessions[nome].timeout);
-  sessions[nome].timeout = setTimeout(() => {
-    if (!sessions[nome]?.qrBase64 || sessions[nome]?.erroServidor) {
-      log(`❌ Sessão "${nome}" será encerrada: QR não gerado ou sem resposta do servidor`, "error");
-      cleanupSession(nome);
-    }
-  }, 5 * 60 * 1000);
-}
-
-// Envia QR para PHP e retorna resposta
+// Função para enviar QR para o servidor PHP
 async function enviarQrParaServidor(nome, base64) {
   try {
     const resposta = await acessarServidor("salvar_qrcod.php", {
       method: "POST",
       data: { nome, base64 },
     });
-
-    if (!resposta?.success) {
-      sessions[nome].erroServidor = true;
-      throw new Error("Servidor não respondeu corretamente ao salvar QR");
-    }
-
-    log(`Servidor respondeu para sessão "${nome}": ${JSON.stringify(resposta)}`, "success");
-    return resposta;
+    return resposta; // Retorna o JSON recebido do PHP
   } catch (err) {
-    log(`❌ Erro ao enviar QR ao servidor: ${err.message}`, "error");
-    sessions[nome].erroServidor = true;
-    return { success: false, error: "Falha ao enviar QR ao servidor" };
+    console.error(`[${nome}] [enviarQrParaServidor] Erro ao enviar QR:`, err);
+    return { success: false, error: "Erro ao enviar QR para o servidor" };
   }
 }
 
-// Função para regenerar QR se expirar
-async function regenerateQr(nome) {
-  if (!sessions[nome]) return;
-  const maxUpdates = 6;
-  sessions[nome].updates = (sessions[nome].updates || 0) + 1;
+// Handler principal da rota QR Code
+module.exports = async function qrcodeHandler(req, res) {
+  const nome = req.params?.nome || req.body?.nome;
 
-  if (sessions[nome].updates > maxUpdates) {
-    log(`❌ Sessão "${nome}" não conectada após ${maxUpdates} QRs. Será excluída.`, "error");
-    cleanupSession(nome);
-    sessions[nome] = { excluida: true }; // marca para retorno
-    return;
+  if (!nome) {
+    return res.json({ success: false, error: "Nome da sessão é obrigatório" });
   }
 
-  log(`🔄 Gerando novo QR para sessão "${nome}" (tentativa ${sessions[nome].updates})...`, "warn");
-
-  const qrBase64 = sessions[nome].qrBase64;
-  if (qrBase64) {
-    await enviarQrParaServidor(nome, qrBase64);
+  // Bloqueia requisições simultâneas para a mesma sessão
+  if (sessions[nome]?.inProgress) {
+    return res.json({
+      success: false,
+      error: "Há um processo ainda em andamento para essa sessão",
+    });
   }
-}
 
-// Função para gerar QR inicial
-async function generateQr(nome) {
-  cleanupSession(nome); // remove sessão anterior, se houver
-  log(`🔹 Criando nova instância para sessão "${nome}"...`);
+  // Inicializa a sessão na memória
+  sessions[nome] = sessions[nome] || {};
+  sessions[nome].inProgress = true;
+  sessions[nome].qrStatus = "pending";
+  sessions[nome].qrCount = 0;
 
-  const client = await wppconnect.create({
-    session: nome,
-    puppeteerOptions: {
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      userDataDir: `/app/tokens/${nome}-${Date.now()}`,
-    },
-    autoClose: 0,
-    catchQR: async (base64Qr) => {
-      sessions[nome] = {
-        client,
-        qrBase64: base64Qr,
-        qrStatus: "valid",
-        updates: 0,
-        erroServidor: false,
-      };
-      log(`QR inicial gerado para sessão "${nome}"`, "success");
-      await enviarQrParaServidor(nome, base64Qr);
-    },
-  });
+  console.log(`[${nome}] Iniciando processo de geração de QR Code`);
 
-  if (!sessions[nome]) sessions[nome] = {};
-  sessions[nome].client = client;
-
-  startMonitor(nome, client);
-  setupQrTimeout(nome);
-
-  return new Promise((resolve, reject) => {
-    let waited = 0;
-    const checkInterval = setInterval(() => {
-      if (sessions[nome]?.excluida) {
-        clearInterval(checkInterval);
-        reject(new Error("Sessão excluída após 6 tentativas"));
-      }
-      if (sessions[nome]?.qrBase64) {
-        clearInterval(checkInterval);
-        resolve(sessions[nome].qrBase64);
-      }
-      if (waited++ > 15) {
-        clearInterval(checkInterval);
-        reject(new Error("QR não gerado em tempo hábil"));
-      }
-    }, 1000);
-  });
-}
-
-// Endpoint principal
-async function handleQRCode(req, res) {
-  const nome = req.params.nome?.replace(".png", "");
-  if (!nome) return res.json({ success: false, error: "Nome da sessão não enviado" });
-
-  if (locks[nome]) return res.json({ success: false, error: "Operação em andamento" });
-  locks[nome] = true;
-
-  log(`➡️ Requisição QR iniciada para sessão "${nome}"`);
+  // Fecha sessão antiga se existir
+  if (sessions[nome].client) {
+    try {
+      await sessions[nome].client.close();
+      console.log(`[${nome}] Sessão antiga fechada com sucesso`);
+    } catch (err) {
+      console.warn(`[${nome}] Falha ao fechar sessão antiga:`, err.message);
+    }
+  }
 
   try {
-    const qrBase64 = await generateQr(nome);
-    locks[nome] = false;
+    // Criação da nova sessão WPPConnect
+    const client = await wppconnect.create({
+      session: nome,
+      puppeteerOptions: {
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      },
+      catchQR: async (base64QR, asciiQR, attempt, urlCode) => {
+        // Atualiza contador de QR
+        sessions[nome].qrCount++;
 
-    // Se foi excluída após 6 tentativas
-    if (sessions[nome]?.excluida) {
-      return res.json({ success: false, error: "Sessão excluída após 6 tentativas" });
-    }
+        console.log(
+          `[${nome}] QR Code gerado (tentativa ${sessions[nome].qrCount})`
+        );
 
-    // Envia QR ao servidor e retorna resposta do servidor ao HTML
-    const respostaServidor = await enviarQrParaServidor(nome, qrBase64);
-    if (!respostaServidor?.success) throw new Error("Servidor não respondeu ao salvar QR");
+        // Envia QR para o servidor
+        const resposta = await enviarQrParaServidor(nome, base64QR);
+        console.log(`[${nome}] Resposta do servidor ao enviar QR:`, resposta);
 
-    return res.json(respostaServidor);
+        // Se passou do limite de 6 tentativas
+        if (sessions[nome].qrCount >= 6) {
+          console.warn(
+            `[${nome}] Limite de 6 atualizações de QR atingido, encerrando sessão`
+          );
+          try {
+            await client.close();
+          } catch (err) {}
+          sessions[nome].inProgress = false;
+          sessions[nome].client = null;
+          return res.json({
+            success: false,
+            error: "Sessão excluída após 6 atualizações do QR Code",
+          });
+        }
+      },
+      statusFind: async (statusSession, session) => {
+        console.log(`[${nome}] Status da sessão:`, statusSession);
+
+        if (statusSession === "CONNECTED" || statusSession === "isLogged") {
+          console.log(`[${nome}] Sessão conectada com sucesso`);
+
+          sessions[nome].qrStatus = "connected";
+
+          // Obtém tokens e envia para atualizar sessão no servidor
+          try {
+            const tokens = await client.getSessionTokenBrowser();
+            const resposta = await acessarServidor("atualizar_sessao.php", {
+              method: "POST",
+              data: { nome, dados: JSON.stringify({ conectado: true, tokens }) },
+            });
+
+            console.log(`[${nome}] Resposta do servidor ao atualizar sessão:`, resposta);
+
+            // Envia sucesso ao HTML
+            res.json({
+              success: true,
+              message: "Sessão de WhatsApp conectada com sucesso",
+              dados: tokens,
+            });
+          } catch (err) {
+            console.error(`[${nome}] Erro ao enviar tokens para o servidor:`, err);
+            res.json({
+              success: false,
+              error: "Erro ao atualizar sessão no servidor",
+            });
+          } finally {
+            // Fecha sessão e libera memória
+            try {
+              await client.close();
+            } catch (err) {}
+            sessions[nome].inProgress = false;
+            sessions[nome].client = null;
+            console.log(`[${nome}] Sessão finalizada após conexão`);
+          }
+        }
+      },
+    });
+
+    // Salva client na memória
+    sessions[nome].client = client;
   } catch (err) {
-    locks[nome] = false;
-    cleanupSession(nome);
-    return res.json({ success: false, error: err.message });
+    console.error(`[${nome}] Erro ao criar sessão WPPConnect:`, err);
+    sessions[nome].inProgress = false;
+    sessions[nome].client = null;
+    return res.json({ success: false, error: "Erro interno ao criar sessão" });
   }
-}
-
-module.exports = handleQRCode;
+};
