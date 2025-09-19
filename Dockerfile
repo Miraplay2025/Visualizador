@@ -53,6 +53,6 @@ RUN npm install --production && \
 # Copia todo o projeto
 COPY . .
 
-EXPOSE 10000
+EXPOSE 3000
 
 CMD ["npm", "start"]
