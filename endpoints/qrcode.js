@@ -64,9 +64,7 @@ module.exports = async function qrcodeHandler(req, res) {
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       },
       catchQR: async (base64QR, asciiQR, attempt, urlCode) => {
-        // Atualiza contador de QR
         sessions[nome].qrCount++;
-
         console.log(
           `[${nome}] QR Code gerado (tentativa ${sessions[nome].qrCount})`
         );
@@ -75,7 +73,16 @@ module.exports = async function qrcodeHandler(req, res) {
         const resposta = await enviarQrParaServidor(nome, base64QR);
         console.log(`[${nome}] Resposta do servidor ao enviar QR:`, resposta);
 
-        // Se passou do limite de 6 tentativas
+        // Retorna QR Code para o HTML
+        if (sessions[nome].qrStatus === "pending") {
+          res.json({
+            success: true,
+            caminho: resposta?.caminho || null,
+            message: "QR Code gerado com sucesso",
+          });
+        }
+
+        // Limite de 6 atualizações
         if (sessions[nome].qrCount >= 6) {
           console.warn(
             `[${nome}] Limite de 6 atualizações de QR atingido, encerrando sessão`
@@ -85,10 +92,6 @@ module.exports = async function qrcodeHandler(req, res) {
           } catch (err) {}
           sessions[nome].inProgress = false;
           sessions[nome].client = null;
-          return res.json({
-            success: false,
-            error: "Sessão excluída após 6 atualizações do QR Code",
-          });
         }
       },
       statusFind: async (statusSession, session) => {
@@ -109,7 +112,7 @@ module.exports = async function qrcodeHandler(req, res) {
 
             console.log(`[${nome}] Resposta do servidor ao atualizar sessão:`, resposta);
 
-            // Envia sucesso ao HTML
+            // Retorna sucesso ao HTML
             res.json({
               success: true,
               message: "Sessão de WhatsApp conectada com sucesso",
@@ -123,9 +126,7 @@ module.exports = async function qrcodeHandler(req, res) {
             });
           } finally {
             // Fecha sessão e libera memória
-            try {
-              await client.close();
-            } catch (err) {}
+            try { await client.close(); } catch (err) {}
             sessions[nome].inProgress = false;
             sessions[nome].client = null;
             console.log(`[${nome}] Sessão finalizada após conexão`);
@@ -136,6 +137,7 @@ module.exports = async function qrcodeHandler(req, res) {
 
     // Salva client na memória
     sessions[nome].client = client;
+
   } catch (err) {
     console.error(`[${nome}] Erro ao criar sessão WPPConnect:`, err);
     sessions[nome].inProgress = false;
