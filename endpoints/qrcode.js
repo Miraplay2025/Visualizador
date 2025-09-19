@@ -1,4 +1,4 @@
-   // qrcode.js
+// qrcode.js
 const fs = require("fs");
 const path = require("path");
 const wppconnect = require("@wppconnect-team/wppconnect");
@@ -30,7 +30,6 @@ module.exports = async function qrcodeHandler(req, res) {
     return res.json({ success: false, error: "Nome da sessão é obrigatório" });
   }
 
-  // Bloqueia requisições simultâneas para a mesma sessão
   if (sessions[nome]?.inProgress) {
     return res.json({
       success: false,
@@ -45,7 +44,6 @@ module.exports = async function qrcodeHandler(req, res) {
 
   console.log(`[${nome}] Iniciando processo de geração de QR Code`);
 
-  // Fecha sessão antiga se existir
   if (sessions[nome].client) {
     try { await sessions[nome].client.close(); } catch (err) {}
   }
@@ -57,12 +55,12 @@ module.exports = async function qrcodeHandler(req, res) {
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       },
-      autoClose: 0, // ⚠️ desabilita fechamento automático
+      autoClose: 0, // ⚠️ impede fechamento automático
       catchQR: async (base64QR, asciiQR, attempt, urlCode) => {
         sessions[nome].qrCount++;
         console.log(`[${nome}] QR Code gerado (tentativa ${sessions[nome].qrCount})`);
 
-        // Envia QR para o servidor
+        // Envia QR para o servidor sempre que for gerado
         await enviarQrParaServidor(nome, base64QR);
 
         // Limite de 6 tentativas
@@ -118,4 +116,3 @@ module.exports = async function qrcodeHandler(req, res) {
     }
   }
 };
-     
