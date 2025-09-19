@@ -89,6 +89,20 @@ async function regenerateQr(nome, client) {
   }
 }
 
+// Função auxiliar para esperar QR (polling)
+async function waitForQr(nome, client, timeoutSec = 15) {
+  let waited = 0;
+  while (!sessions[nome]?.qrBase64 && waited < timeoutSec) {
+    await new Promise((r) => setTimeout(r, 1000));
+    waited++;
+  }
+  if (!sessions[nome]?.qrBase64) {
+    log(`QR não capturado via catchQR — gerando via generateQrCode()`);
+    return await regenerateQr(nome, client);
+  }
+  return sessions[nome].qrBase64;
+}
+
 // Endpoint principal
 async function handleQRCode(req, res) {
   const nome = req.params.nome?.replace(".png", "");
@@ -151,23 +165,12 @@ async function handleQRCode(req, res) {
     startMonitor(nome, client);
     setupQrTimeout(nome);
 
-    // Espera até QR estar pronto (max 15s)
-    let waited = 0;
-    while (!sessions[nome].qrBase64 && waited < 15) {
-      await new Promise((r) => setTimeout(r, 1000));
-      waited++;
-    }
+    // Aguarda QR, garantindo sempre retorno
+    const qrBase64 = await waitForQr(nome, client);
 
-    if (!sessions[nome]?.qrBase64) {
-      log(`QR não veio no catchQR — tentando regenerateQr("${nome}")`);
-      const forcedQr = await regenerateQr(nome, client);
-      locks[nome] = false;
-      return res.json({ success: true, message: "QR gerado via regenerate", base64: forcedQr });
-    }
-
-    log(`QR Code gerado com sucesso para sessão "${nome}"`);
+    log(`QR Code finalizado e pronto para sessão "${nome}"`);
     locks[nome] = false;
-    return res.json({ success: true, message: "QR Code gerado", base64: sessions[nome].qrBase64 });
+    return res.json({ success: true, message: "QR Code gerado", base64: qrBase64 });
 
   } catch (err) {
     log(`❌ Erro ao gerar QR: ${err.message}`);
