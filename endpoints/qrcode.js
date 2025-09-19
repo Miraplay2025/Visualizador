@@ -14,6 +14,7 @@ async function enviarQrParaServidor(nome, base64) {
       method: "POST",
       data: { nome, base64 },
     });
+    console.log(`[${nome}] QR enviado para servidor:`, resposta);
     return resposta; // Retorna o JSON recebido do PHP
   } catch (err) {
     console.error(`[${nome}] [enviarQrParaServidor] Erro ao enviar QR:`, err);
@@ -69,29 +70,24 @@ module.exports = async function qrcodeHandler(req, res) {
           `[${nome}] QR Code gerado (tentativa ${sessions[nome].qrCount})`
         );
 
-        // Envia QR para o servidor
-        const resposta = await enviarQrParaServidor(nome, base64QR);
-        console.log(`[${nome}] Resposta do servidor ao enviar QR:`, resposta);
+        // Envia QR para o servidor sempre que for gerado
+        await enviarQrParaServidor(nome, base64QR);
 
-        // Retorna QR Code para o HTML
-        if (sessions[nome].qrStatus === "pending") {
-          res.json({
-            success: true,
-            caminho: resposta?.caminho || null,
-            message: "QR Code gerado com sucesso",
-          });
-        }
-
-        // Limite de 6 atualizações
+        // Se passou do limite de 6 tentativas, fecha sessão
         if (sessions[nome].qrCount >= 6) {
           console.warn(
             `[${nome}] Limite de 6 atualizações de QR atingido, encerrando sessão`
           );
-          try {
-            await client.close();
-          } catch (err) {}
+          try { await client.close(); } catch (err) {}
           sessions[nome].inProgress = false;
           sessions[nome].client = null;
+          // Retorna erro final para o HTML
+          if (!res.headersSent) {
+            return res.json({
+              success: false,
+              error: "Sessão excluída após 6 atualizações do QR Code",
+            });
+          }
         }
       },
       statusFind: async (statusSession, session) => {
@@ -112,18 +108,22 @@ module.exports = async function qrcodeHandler(req, res) {
 
             console.log(`[${nome}] Resposta do servidor ao atualizar sessão:`, resposta);
 
-            // Retorna sucesso ao HTML
-            res.json({
-              success: true,
-              message: "Sessão de WhatsApp conectada com sucesso",
-              dados: tokens,
-            });
+            // Envia sucesso ao HTML
+            if (!res.headersSent) {
+              res.json({
+                success: true,
+                message: "Sessão de WhatsApp conectada com sucesso",
+                dados: tokens,
+              });
+            }
           } catch (err) {
             console.error(`[${nome}] Erro ao enviar tokens para o servidor:`, err);
-            res.json({
-              success: false,
-              error: "Erro ao atualizar sessão no servidor",
-            });
+            if (!res.headersSent) {
+              res.json({
+                success: false,
+                error: "Erro ao atualizar sessão no servidor",
+              });
+            }
           } finally {
             // Fecha sessão e libera memória
             try { await client.close(); } catch (err) {}
@@ -142,6 +142,8 @@ module.exports = async function qrcodeHandler(req, res) {
     console.error(`[${nome}] Erro ao criar sessão WPPConnect:`, err);
     sessions[nome].inProgress = false;
     sessions[nome].client = null;
-    return res.json({ success: false, error: "Erro interno ao criar sessão" });
+    if (!res.headersSent) {
+      return res.json({ success: false, error: "Erro interno ao criar sessão" });
+    }
   }
 };
