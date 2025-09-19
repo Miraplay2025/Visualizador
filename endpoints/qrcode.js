@@ -1,4 +1,4 @@
-const wppconnect = require("wppconnect");
+const wppconnect = require("@wppconnect-team/wppconnect");
 
 /**
  * Endpoint para gerar e retornar o QR Code de uma sessão.
@@ -19,13 +19,13 @@ module.exports = async (req, res) => {
     await wppconnect.create({
       session: nomeSessao,
       catchQR: (base64Qr) => {
-        // Loga somente no servidor
+        // Loga apenas no servidor
         console.log(`[${new Date().toISOString()}] ✅ QR Code gerado para sessão: ${nomeSessao}`);
 
-        // 3️⃣ Retorna para o frontend em JSON
+        // 3️⃣ Retorna JSON com o QR Code em base64
         res.json({
           success: true,
-          qrcode: base64Qr, // QR em base64
+          qrcode: base64Qr,
         });
       },
       puppeteerOptions: {
@@ -33,6 +33,7 @@ module.exports = async (req, res) => {
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       },
     }).then((client) => {
+      // Se já estiver logado, não precisa de QR Code
       client.isLoggedIn().then((logged) => {
         if (logged) {
           console.log(`[${new Date().toISOString()}] 🔹 Sessão já autenticada: ${nomeSessao}`);
@@ -52,4 +53,3 @@ module.exports = async (req, res) => {
     });
   }
 };
-
