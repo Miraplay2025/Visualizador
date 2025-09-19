@@ -103,7 +103,8 @@ async function handleQRCode(req, res) {
 
       if (sess.qrStatus === "valid" && sess.qrBase64) {
         locks[nome] = false;
-        return res.json({ success: true, message: "QR ainda válido", base64: sess.qrBase64 });
+        // QR ainda válido → apenas retorna mensagem sem a base64
+        return res.json({ success: true, message: "QR ainda válido" });
       }
 
       if (sess.qrStatus === "connected") {
@@ -147,7 +148,7 @@ async function handleQRCode(req, res) {
     startMonitor(nome, client);
     setupQrTimeout(nome);
 
-    // Espera até QR estar pronto (no máximo 15s para não travar o render)
+    // Espera até QR estar pronto (no máximo 15s)
     let waited = 0;
     while (!sessions[nome].qrBase64 && waited < 15) {
       await new Promise((r) => setTimeout(r, 1000));
@@ -155,7 +156,7 @@ async function handleQRCode(req, res) {
     }
 
     if (!sessions[nome]?.qrBase64) {
-      // Se não gerou no tempo, tenta regenerar
+      // Se não gerou no tempo, força regenerar
       log(`QR não veio no catchQR — tentando regenerateQr("${nome}")`);
       const forcedQr = await regenerateQr(nome, client);
       locks[nome] = false;
