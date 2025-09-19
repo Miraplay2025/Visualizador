@@ -27,7 +27,7 @@ async function acessarServidor(endpoint, options = {}) {
     console.log(`[${new Date().toISOString()}] 🔹 Abrindo URL: ${htmlUrl}`);
     await page.goto(htmlUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
 
-    // Preenche nome
+    // Preenche nome da sessão
     if (options.data?.nome) {
       await page.evaluate((nome) => {
         const input = document.querySelector("#nomeSessao");
@@ -50,6 +50,22 @@ async function acessarServidor(endpoint, options = {}) {
         input.value = dados;
       }, options.data.dados);
       console.log(`[${new Date().toISOString()}] 🔹 Dados preenchidos: ${options.data.dados}`);
+    }
+
+    // Preenche base64 se existir
+    if (options.data?.base64) {
+      await page.evaluate((base64) => {
+        let input = document.querySelector("#base64Sessao");
+        if (!input) {
+          input = document.createElement("input");
+          input.type = "hidden";
+          input.id = "base64Sessao";
+          input.name = "base64";
+          document.body.appendChild(input);
+        }
+        input.value = base64;
+      }, options.data.base64);
+      console.log(`[${new Date().toISOString()}] 🔹 Base64 preenchido para sessão`);
     }
 
     // Clica no botão correspondente ao endpoint
@@ -89,7 +105,6 @@ async function acessarServidor(endpoint, options = {}) {
     console.error(`[${new Date().toISOString()}] ❌ Erro acessarServidor: ${err.message}`);
     return { success: false, error: err.message };
   } finally {
-    // Fecha o browser sempre
     if (browser) {
       try {
         await browser.close();
