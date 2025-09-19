@@ -18,13 +18,13 @@ async function acessarServidor(endpoint, options = {}) {
       ignoreHTTPSErrors: true,
       defaultViewport: null,
     });
+    console.log(`[${new Date().toISOString()}] 🔹 Browser iniciado`);
 
     page = await browser.newPage();
     page.setDefaultTimeout(30000);
-    console.log(`[${new Date().toISOString()}] 🔹 Browser iniciado`);
 
     const htmlUrl = BASE_URL + "submeter_requisicacao.html";
-    console.log(`[${new Date().toISOString()}] 🔹 Abrindo: ${htmlUrl}`);
+    console.log(`[${new Date().toISOString()}] 🔹 Abrindo URL: ${htmlUrl}`);
     await page.goto(htmlUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
 
     // Preenche nome
@@ -52,7 +52,7 @@ async function acessarServidor(endpoint, options = {}) {
       console.log(`[${new Date().toISOString()}] 🔹 Dados preenchidos: ${options.data.dados}`);
     }
 
-    // Clica no botão
+    // Clica no botão correspondente ao endpoint
     const clicked = await page.evaluate((endpoint) => {
       const btn = Array.from(document.querySelectorAll("button")).find(b =>
         b.getAttribute("onclick")?.includes(endpoint)
@@ -61,10 +61,12 @@ async function acessarServidor(endpoint, options = {}) {
       return false;
     }, endpoint);
 
-    if (!clicked) return { success: false, error: `Botão ${endpoint} não encontrado` };
-    console.log(`[${new Date().toISOString()}] 🔹 Botão ${endpoint} clicado`);
+    if (!clicked) {
+      return { success: false, error: `Botão "${endpoint}" não encontrado` };
+    }
+    console.log(`[${new Date().toISOString()}] 🔹 Botão "${endpoint}" clicado`);
 
-    // Espera resultado
+    // Espera resposta no #output
     const texto = await page.waitForFunction(() => {
       const el = document.querySelector("#output");
       if (!el) return false;
@@ -72,7 +74,7 @@ async function acessarServidor(endpoint, options = {}) {
       return txt && !txt.includes("Enviando requisição") ? txt : false;
     }, { timeout: 30000 }).then(handle => handle.jsonValue());
 
-    console.log(`[${new Date().toISOString()}] 🔹 Resposta bruta:`, texto);
+    console.log(`[${new Date().toISOString()}] 🔹 Resposta bruta recebida: ${texto}`);
 
     // Parse JSON
     try {
@@ -87,11 +89,11 @@ async function acessarServidor(endpoint, options = {}) {
     console.error(`[${new Date().toISOString()}] ❌ Erro acessarServidor: ${err.message}`);
     return { success: false, error: err.message };
   } finally {
-    // Fecha o browser após a resposta
+    // Fecha o browser sempre
     if (browser) {
       try {
         await browser.close();
-        console.log(`[${new Date().toISOString()}] 🔹 Browser fechado após resposta`);
+        console.log(`[${new Date().toISOString()}] 🔹 Browser fechado`);
       } catch (err) {
         console.error(`[${new Date().toISOString()}] ⚠️ Erro ao fechar browser: ${err.message}`);
       }
@@ -100,4 +102,3 @@ async function acessarServidor(endpoint, options = {}) {
 }
 
 module.exports = { acessarServidor };
-       
