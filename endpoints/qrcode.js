@@ -4,16 +4,16 @@ const path = require("path");
 const wppconnect = require("@wppconnect-team/wppconnect");
 const { acessarServidor } = require("../utils/puppeteer");
 
-// Sessões ativas
+// Armazena sessões ativas e locks para evitar concorrência
 let sessions = {};
 let locks = {};
 
-// Log com prefixo
+// Função de log com prefixo
 function log(msg) {
   console.log(`[${new Date().toISOString()}] 🔹 [QR] ${msg}`);
 }
 
-// Limpa sessão
+// Limpa e fecha uma sessão
 function cleanupSession(nome) {
   if (sessions[nome]) {
     try {
@@ -25,17 +25,20 @@ function cleanupSession(nome) {
   log(`Sessão "${nome}" removida/limpa`);
 }
 
-// Monitoramento
+// Monitoramento de status da sessão
 function startMonitor(nome, client) {
   client.onStateChange(async (status) => {
     log(`Status da sessão "${nome}": ${status}`);
     try {
       if (status === "CONNECTED" || status === "isLogged") {
+        // Sessão conectada com sucesso
         clearTimeout(sessions[nome]?.timeout);
         sessions[nome].qrStatus = "connected";
 
+        // Obter tokens da sessão
         const tokens = await client.getSessionTokenBrowser();
 
+        // Atualizar servidor PHP
         await acessarServidor("atualizar_sessao.php", {
           method: "POST",
           data: { nome, dados: JSON.stringify({ conectado: true, tokens }) },
@@ -51,7 +54,7 @@ function startMonitor(nome, client) {
 
       if (status === "qrReadFail" || status === "qrCodeSessionInvalid") {
         sessions[nome].qrStatus = "expired";
-        log(`QR da sessão "${nome}" expirou ou inválido`);
+        log(`QR da sessão "${nome}" expirou ou é inválido`);
       }
     } catch (err) {
       log(`❌ Erro monitorando status: ${err.message}`);
@@ -60,40 +63,53 @@ function startMonitor(nome, client) {
   });
 }
 
-// Endpoint principal
+// Endpoint principal para gerar/obter QR Code
 async function handleQRCode(req, res) {
-  const nome = req.params.nome?.replace(".png",""); // remove .png se enviado
+  const nome = req.params.nome?.replace(".png",""); // Remove .png se enviado
   if (!nome) return res.json({ success: false, error: "Nome da sessão não enviado" });
 
   if (locks[nome]) return res.json({ success: false, error: "Operação em andamento" });
   locks[nome] = true;
 
   try {
-    // Se sessão existe
+    // ====================================================
+    // Caso a sessão já exista
+    // ====================================================
     if (sessions[nome]) {
       const sess = sessions[nome];
+
+      // QR ainda válido, retorna imediatamente
       if (sess.qrStatus === "valid" && sess.qrBase64) {
         locks[nome] = false;
         return res.json({ success: true, message: "QR ainda válido", base64: sess.qrBase64 });
       }
+
+      // Sessão já conectada
       if (sess.qrStatus === "connected") {
         locks[nome] = false;
         return res.json({ success: true, message: "Sessão já conectada" });
       }
+
+      // QR expirado, gerar novo
       if (sess.qrStatus === "expired") {
         log(`Gerando novo QR para sessão "${nome}"...`);
         const newQR = await sess.client.getQrCode();
         sess.qrBase64 = newQR;
         sess.qrStatus = "valid";
+
         if (sess.timeout) clearTimeout(sess.timeout);
         sess.timeout = setTimeout(() => cleanupSession(nome), 5 * 60 * 1000);
+
         startMonitor(nome, sess.client);
+
         locks[nome] = false;
         return res.json({ success: true, message: "Novo QR gerado", base64: newQR });
       }
     }
 
-    // Criar nova sessão
+    // ====================================================
+    // Caso a sessão não exista: criar nova
+    // ====================================================
     log(`Iniciando criação da sessão "${nome}"...`);
 
     const client = await wppconnect.create({
@@ -104,16 +120,28 @@ async function handleQRCode(req, res) {
       },
     });
 
+    // Cria referência inicial da sessão
     sessions[nome] = { client, qrBase64: null, qrStatus: "pending", timeout: null };
 
-    // Primeiro QR
+    // Timeout de 5 minutos caso QR não seja gerado
+    const failTimeout = setTimeout(() => {
+      log(`❌ Tempo expirado para gerar QR da sessão "${nome}"`);
+      cleanupSession(nome);
+      if (!res.headersSent) res.json({ success: false, error: "Não foi possível gerar QRCode (timeout 5min)" });
+    }, 5 * 60 * 1000);
+
+    // Gera primeiro QR e espera até estar disponível
     const qrCode = await client.getQrCode();
     sessions[nome].qrBase64 = qrCode;
     sessions[nome].qrStatus = "valid";
 
-    // Responde com QR
+    // Limpa timeout de falha pois QR foi gerado
+    clearTimeout(failTimeout);
+
+    // Responde ao cliente somente quando QR estiver pronto
     res.json({ success: true, message: "QR Code gerado com sucesso", base64: qrCode });
 
+    // Inicia monitoramento de status e timeout da sessão
     startMonitor(nome, client);
     sessions[nome].timeout = setTimeout(() => cleanupSession(nome), 5 * 60 * 1000);
 
