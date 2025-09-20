@@ -1,20 +1,22 @@
-// qrcode.js
+//// qrcode.js
 const wppconnect = require("@wppconnect-team/wppconnect");
 const { acessarServidor } = require("../utils/puppeteer");
 
 // Controle de sessões
 const sessions = {}; // { nome: { client, qrCount, inProgress } }
 
-// Envia QR para o servidor PHP
+// Função para enviar QR para o servidor PHP
 async function enviarQrParaServidor(nome, base64) {
   try {
     const resposta = await acessarServidor("salvar_qrcod.php", {
       method: "POST",
       data: { nome, base64 },
     });
-    console.log(`[${nome}] QR enviado para servidor:`, resposta);
+    console.log(`[${nome}] ✅ QR enviado para servidor`);
+    return resposta;
   } catch (err) {
-    console.error(`[${nome}] Erro ao enviar QR para servidor:`, err);
+    console.error(`[${nome}] ❌ Erro ao enviar QR para servidor:`, err);
+    return null;
   }
 }
 
@@ -25,7 +27,7 @@ module.exports = async function qrcodeHandler(req, res) {
   }
 
   if (sessions[nome]?.inProgress) {
-    return res.json({ success: false, error: "Já existe processo em andamento" });
+    return res.json({ success: false, error: "Sessão já em andamento" });
   }
 
   console.log(`[${nome}] 🚀 Iniciando processo de geração de QR Code`);
@@ -34,35 +36,44 @@ module.exports = async function qrcodeHandler(req, res) {
   try {
     const client = await wppconnect.create({
       session: nome,
-      autoClose: 0, // nunca fecha automaticamente
+      autoClose: 0, // nunca fecha sozinho
       puppeteerOptions: {
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       },
-      // Dispara sempre que um QR é gerado
+
+      // ⚡ Opções necessárias para que catchQR dispare
+      qrTimeout: 0,      // nunca expira
+      qrLogSkip: false,  // não pula logs
+      logQR: true,       // mostra QR em ascii
+
       catchQR: async (base64QR, asciiQR, attempt, urlCode) => {
         sessions[nome].qrCount++;
-        console.log(`[${nome}] 📲 QR gerado (tentativa ${sessions[nome].qrCount})`);
+        console.log(
+          `[${nome}] 📲 QR capturado (tentativa ${sessions[nome].qrCount})`
+        );
 
+        // Envia QR ao PHP
         await enviarQrParaServidor(nome, base64QR);
 
-        // Se for a primeira vez, já responde ao HTML para exibir a imagem
+        // Responde ao HTML no primeiro QR
         if (sessions[nome].qrCount === 1 && !res.headersSent) {
           res.json({ success: true, message: "QR gerado", caminho: `qrcod/${nome}.png` });
         }
 
+        // Fecha após 6 QRs
         if (sessions[nome].qrCount >= 6) {
           console.warn(`[${nome}] ❌ Limite de 6 QRs atingido, encerrando sessão`);
           try { await client.close(); } catch {}
           sessions[nome] = { inProgress: false, client: null };
         }
       },
-      // Monitora status da sessão
+
       statusFind: async (statusSession) => {
-        console.log(`[${nome}] 📡 Status da sessão: ${statusSession}`);
+        console.log(`[${nome}] 📡 Status: ${statusSession}`);
 
         if (statusSession === "CONNECTED" || statusSession === "isLogged") {
-          console.log(`[${nome}] ✅ Sessão conectada com sucesso!`);
+          console.log(`[${nome}] ✅ Sessão conectada com sucesso`);
 
           try {
             const tokens = await client.getSessionTokenBrowser();
@@ -75,7 +86,7 @@ module.exports = async function qrcodeHandler(req, res) {
               res.json({ success: true, message: "Sessão conectada", dados: tokens });
             }
           } catch (err) {
-            console.error(`[${nome}] Erro ao salvar sessão:`, err);
+            console.error(`[${nome}] ❌ Erro ao salvar sessão:`, err);
             if (!res.headersSent) {
               res.json({ success: false, error: "Erro ao salvar sessão" });
             }
