@@ -2,7 +2,7 @@ FROM node:18-slim
 
 WORKDIR /app
 
-# Dependências do Chromium
+# Instalar dependências necessárias do Chromium
 RUN apt-get update && apt-get install -y \
   wget \
   ca-certificates \
@@ -46,9 +46,9 @@ RUN apt-get update && apt-get install -y \
 # Copia package.json e package-lock.json
 COPY package*.json ./
 
-# Instala dependências + Chromium
+# Instalar dependências + Chromium via Puppeteer
 RUN npm install --production && \
-    npx puppeteer browsers install chrome
+    npx puppeteer@latest install chrome
 
 # Copia todo o projeto
 COPY . .
