@@ -62,11 +62,11 @@ const createNewInstance = async (sessionName, res) => {
       session: sessionName,
       headless: true, // Modo headless para rodar sem interface gráfica
       args: [
-        '--no-sandbox', 
-        '--disable-setuid-sandbox', 
-        '--disable-dev-shm-usage', // Adicionado para evitar problemas de memória
-        '--disable-gpu', // Desabilita a GPU, útil para ambientes de servidor
-        '--remote-debugging-port=9222' // Porta para depuração remota, útil para debugging
+        '--no-sandbox', // Necessário para ambientes como o Render
+        '--disable-setuid-sandbox', // Necessário para segurança
+        '--disable-dev-shm-usage', // Resolves issues with shared memory on Docker
+        '--disable-gpu', // Desabilita a GPU
+        '--remote-debugging-port=9222', // Porta para depuração remota, útil para debugging
       ],
     });
 
