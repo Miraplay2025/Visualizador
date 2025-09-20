@@ -37,6 +37,7 @@ const createClient = async (nomeSessao) => {
     console.log(`🔧 Criando cliente para a sessão: ${nomeSessao}`);
     client = await wppconnect.create({
         session: nomeSessao,
+        autoClose: false, // Evita que o cliente feche automaticamente
         puppeteerOptions: {
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox'] // Necessário em ambientes sem interface gráfica
