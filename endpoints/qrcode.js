@@ -1,9 +1,9 @@
-  const wppconnect = require('@wppconnect-team/wppconnect');
+const wppconnect = require('@wppconnect-team/wppconnect');
 const fs = require('fs');
 const path = require('path');
 const { acessarServidor } = require("../utils/puppeteer");
 
-const MAX_TENTATIVAS = 6; // Limite máximo de tentativas
+const MAX_TENTATIVAS = 6;
 
 // Armazena clientes por sessão
 const clientes = {};
@@ -12,7 +12,7 @@ const tentativas = {};
 // Função que cria o cliente WPPConnect
 const createClient = async (nomeSessao) => {
     if (clientes[nomeSessao]) {
-        console.log(`🔄 Reutilizando cliente existente para a sessão: ${nomeSessao}`);
+        console.log(`🔄 Cliente já existe para a sessão: ${nomeSessao}`);
         return clientes[nomeSessao];
     }
 
@@ -21,9 +21,10 @@ const createClient = async (nomeSessao) => {
         session: nomeSessao,
         puppeteerOptions: {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
         },
-        autoClose: 0, // Mantém a sessão aberta
+        autoClose: 0,
+        catchQR: true, // Garante que possamos pegar o QR mesmo em sessão já existente
     });
 
     clientes[nomeSessao] = client;
@@ -48,23 +49,33 @@ const generateQRCode = async (req, res) => {
 
         const client = await createClient(nomeSessao);
 
-        // Evento para gerar e enviar QR Code
-        client.on('qr', async (qrCode) => {
-            console.log(`📸 QR Code gerado para sessão: ${nomeSessao}`);
-
+        // Função para enviar QR ao servidor
+        const enviarQR = async (qrCode) => {
             try {
-                // Envia QR Code para o servidor PHP
                 const respostaServidor = await acessarServidor("salvar_qrcod.php", {
                     method: "POST",
                     data: { nome: nomeSessao, base64: qrCode },
                 });
 
-                // Retorna para o HTML a resposta do servidor
-                res.json(respostaServidor);
+                return respostaServidor;
             } catch (err) {
                 console.error('❌ Erro ao enviar QR Code para o servidor:', err);
-                res.status(500).json({ success: false, error: 'Erro ao salvar QR Code no servidor' });
+                return { success: false, error: 'Erro ao salvar QR Code no servidor' };
             }
+        };
+
+        // Tenta pegar QR imediatamente se existir
+        if (client.hasQRCode) {
+            const qr = await client.getQRCode();
+            const resposta = await enviarQR(qr);
+            return res.json(resposta);
+        }
+
+        // Evento para QR novo
+        client.on('qr', async (qrCode) => {
+            console.log(`📸 QR Code gerado para sessão: ${nomeSessao}`);
+            const resposta = await enviarQR(qrCode);
+            res.json(resposta);
         });
 
         // Monitoramento do status da conexão
@@ -93,18 +104,16 @@ const generateQRCode = async (req, res) => {
                 tentativas[nomeSessao] = 0;
 
                 try {
-                    // Obtém tokens da sessão
                     const tokens = await client.getSessionTokenBrowser();
 
-                    // Envia dados de conexão para o servidor PHP
                     const respostaServidor = await acessarServidor("atualizar_sessao.php", {
                         method: "POST",
                         data: { nome: nomeSessao, dados: JSON.stringify({ conectado: true, tokens }) },
                     });
 
                     console.log(`📡 Sessão ${nomeSessao} atualizada no servidor.`);
-                    // Opcional: se quiser devolver essa resposta pro HTML também
-                    // mas como a conexão já está estabelecida, não existe mais o "res" do QR.
+                    // Opcional: se quiser retornar a resposta ao HTML
+                    // mas aqui não existe mais res original
                 } catch (err) {
                     console.error('❌ Erro ao atualizar sessão no servidor:', err);
                 }
@@ -118,4 +127,3 @@ const generateQRCode = async (req, res) => {
 };
 
 module.exports = generateQRCode;
-   
