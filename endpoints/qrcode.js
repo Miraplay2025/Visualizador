@@ -61,6 +61,7 @@ const createNewInstance = async (sessionName, res) => {
     const client = await WppConnect.create({
       session: sessionName,
       headless: true, // Modo headless para rodar sem interface gráfica
+      autoClose: 0, // Nunca fecha automaticamente
       puppeteerOptions: {
         headless: true,
         args: [
