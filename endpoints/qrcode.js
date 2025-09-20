@@ -78,10 +78,11 @@ const createNewInstance = async (sessionName, res) => {
     // Configura o evento do QR Code
     client.on('qr', (qrCode) => {
       console.log(`🔑 QR Code gerado para a sessão "${sessionName}":`);
-
+      
       // Exibe o QR Code no log
       const qrCodeBase64 = `data:image/png;base64,${qrCode}`;
-      // Aqui você pode salvar ou retornar esse QR Code base64 conforme necessário
+      
+      // Envia o QR Code como resposta
       return res.json({
         success: true,
         message: 'QR Code gerado com sucesso.',
