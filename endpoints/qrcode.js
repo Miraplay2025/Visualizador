@@ -1,111 +1,135 @@
-// qrcode.js
-const wppconnect = require("@wppconnect-team/wppconnect");
-const { acessarServidor } = require("../utils/puppeteer");
+const WppConnect = require('@wppconnect-team/wppconnect'); // biblioteca para conexão com WhatsApp
+const fs = require('fs');
+const path = require('path');
 
-// Controle de sessões
-const sessions = {}; // { nome: { client, qrCount, inProgress } }
+// Caminho onde as sessões serão armazenadas (Você pode personalizar isso)
+const sessionsDir = path.join(__dirname, 'sessions');
 
-// Função para enviar QR para o servidor PHP
-async function enviarQrParaServidor(nome, base64) {
-  try {
-    await acessarServidor("salvar_qrcod.php", {
-      method: "POST",
-      data: { nome, base64 },
+// Função para verificar se a sessão está em andamento
+const isSessionInProgress = (sessionName) => {
+  const sessionPath = path.join(sessionsDir, `${sessionName}.json`);
+  return fs.existsSync(sessionPath) && require(sessionPath).status === 'running';
+};
+
+// Função para criar uma nova instância do WppConnect
+const createNewInstance = async (sessionName, res) => {
+  const sessionPath = path.join(sessionsDir, `${sessionName}.json`);
+
+  console.log(`\n🚀 Iniciando o processo de conexão para a sessão: "${sessionName}"`);
+
+  // Se já existe uma instância em andamento, retorna erro
+  if (isSessionInProgress(sessionName)) {
+    console.log(`❌ A sessão "${sessionName}" já está em andamento. Não é possível iniciar uma nova instância.`);
+    return res.json({
+      success: false,
+      error: `A sessão "${sessionName}" já está em andamento.`,
     });
-    console.log(`[${nome}] ✅ QR enviado para servidor`);
-  } catch (err) {
-    console.error(`[${nome}] ❌ Erro ao enviar QR:`, err.message);
-  }
-}
-
-module.exports = async function qrcodeHandler(req, res) {
-  const nome = req.params?.nome || req.body?.nome;
-  if (!nome) {
-    return res.json({ success: false, error: "Nome da sessão é obrigatório" });
   }
 
-  if (sessions[nome]?.inProgress) {
-    return res.json({ success: false, error: "Sessão já em andamento" });
+  // Se existe uma instância salva, exclua e reinicie
+  if (fs.existsSync(sessionPath)) {
+    console.log(`🧹 Sessão anterior encontrada. Excluindo a sessão existente "${sessionName}"...`);
+    fs.unlinkSync(sessionPath); // Exclui a sessão existente
   }
 
-  console.log(`[${nome}] 🚀 Iniciando processo de geração de QR Code`);
-  sessions[nome] = { inProgress: true, qrCount: 0, client: null };
+  // Cria um novo arquivo de sessão para manter o estado
+  fs.writeFileSync(sessionPath, JSON.stringify({ status: 'running', attempts: 0 }));
 
+  // Cria a nova instância do WppConnect
   try {
-    const client = await wppconnect.create({
-      session: nome,
-      autoClose: 0, // nunca fecha sozinho
-      disableWelcome: true,
-      puppeteerOptions: {
-        headless: true,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      },
+    console.log(`💻 Criando nova instância do WppConnect para a sessão "${sessionName}"...`);
 
-      // ⚡ Força o QR aparecer
-      qrTimeout: 0,
-      qrLogSkip: false,
-      logQR: false,
-
-      catchQR: async (base64QR, asciiQR, attempt, urlCode) => {
-        sessions[nome].qrCount++;
-        console.log(`[${nome}] 📲 QR capturado (tentativa ${sessions[nome].qrCount})`);
-
-        // Envia QR ao servidor PHP
-        await enviarQrParaServidor(nome, base64QR);
-
-        // Retorna no 1º QR para o HTML
-        if (sessions[nome].qrCount === 1 && !res.headersSent) {
-          res.json({
-            success: true,
-            message: "QR gerado",
-            caminho: `qrcod/${nome}.png`,
-          });
-        }
-
-        // Se passar de 6 tentativas, encerra
-        if (sessions[nome].qrCount >= 6) {
-          console.warn(`[${nome}] ❌ Limite de 6 QRs atingido, encerrando sessão`);
-          try { await client.close(); } catch {}
-          sessions[nome] = { inProgress: false, client: null };
-        }
-      },
-
-      statusFind: async (statusSession) => {
-        console.log(`[${nome}] 📡 Status: ${statusSession}`);
-
-        if (statusSession === "CONNECTED" || statusSession === "isLogged") {
-          console.log(`[${nome}] ✅ Sessão conectada`);
-
-          try {
-            const tokens = await client.getSessionTokenBrowser();
-            await acessarServidor("atualizar_sessao.php", {
-              method: "POST",
-              data: { nome, dados: JSON.stringify({ conectado: true, tokens }) },
-            });
-
-            if (!res.headersSent) {
-              res.json({ success: true, message: "Sessão conectada", dados: tokens });
-            }
-          } catch (err) {
-            console.error(`[${nome}] ❌ Erro ao salvar sessão:`, err.message);
-            if (!res.headersSent) {
-              res.json({ success: false, error: "Erro ao salvar sessão" });
-            }
-          } finally {
-            try { await client.close(); } catch {}
-            sessions[nome] = { inProgress: false, client: null };
-          }
-        }
-      },
+    const client = await WppConnect.create({
+      session: sessionName,
+      headless: true, // Modo headless para rodar sem interface gráfica
+      args: ["--no-sandbox", "--disable-setuid-sandbox"], // Adicionando argumentos necessários para o Render
     });
 
-    sessions[nome].client = client;
+    console.log(`✅ Instância do WppConnect criada com sucesso para a sessão "${sessionName}"!`);
 
-  } catch (err) {
-    console.error(`[${nome}] ❌ Erro ao criar sessão:`, err.message);
-    sessions[nome] = { inProgress: false, client: null };
-    if (!res.headersSent) {
-      res.json({ success: false, error: "Falha ao criar sessão" });
-    }
+    // Configura o evento do QR Code
+    client.on('qr', (qrCode) => {
+      console.log(`🔑 QR Code gerado para a sessão "${sessionName}":`);
+
+      // Exibe o QR Code no log
+      const qrCodeBase64 = `data:image/png;base64,${qrCode}`;
+      // Aqui você pode salvar ou retornar esse QR Code base64 conforme necessário
+      return res.json({
+        success: true,
+        message: 'QR Code gerado com sucesso.',
+        qrCode: qrCodeBase64, // Retorna o QR Code em base64
+      });
+    });
+
+    // Lida com a conexão e expiração do QR Code
+    client.on('qrExpired', async () => {
+      let attempts = require(sessionPath).attempts || 0;
+      attempts++;
+
+      if (attempts >= 6) {
+        // Exclui a sessão após 6 tentativas sem conexão
+        console.log(`❌ 6 tentativas falhas para escanear o QR Code na sessão "${sessionName}". Excluindo sessão...`);
+        fs.unlinkSync(sessionPath);
+        client.close();
+        return res.json({
+          success: false,
+          message: 'Sessão excluída após 6 tentativas sem conexão.',
+        });
+      }
+
+      // Atualiza o número de tentativas
+      const sessionData = require(sessionPath);
+      sessionData.attempts = attempts;
+      fs.writeFileSync(sessionPath, JSON.stringify(sessionData));
+
+      // Tenta gerar um novo QR Code
+      console.log(`⏳ QR Code expirado na sessão "${sessionName}". Tentativa ${attempts}/6.`);
+      client.restart();
+    });
+
+    // Lida com a conexão do WhatsApp
+    client.on('authenticated', () => {
+      console.log(`✅ QR Code escaneado com sucesso para a sessão "${sessionName}"! Conexão estabelecida.`);
+      const sessionData = require(sessionPath);
+      sessionData.status = 'authenticated';
+      fs.writeFileSync(sessionPath, JSON.stringify(sessionData));
+
+      return res.json({
+        success: true,
+        message: 'QR Code escaneado com sucesso e conectado!',
+      });
+    });
+
+    // Evento de desconexão
+    client.on('disconnected', (reason) => {
+      console.log(`⚠️ A sessão "${sessionName}" foi desconectada. Razão: ${reason}`);
+      fs.unlinkSync(sessionPath); // Exclui a sessão
+    });
+  } catch (error) {
+    console.error(`❌ Erro ao tentar criar a instância do WppConnect para a sessão "${sessionName}"`, error);
+    return res.json({
+      success: false,
+      error: 'Erro ao tentar criar a instância do WppConnect.',
+    });
   }
 };
+
+// Função principal que será chamada no endpoint
+const handleQrcode = async (req, res) => {
+  const { nome } = req.params;
+
+  if (!nome) {
+    console.log("❌ Nome da sessão não fornecido.");
+    return res.json({
+      success: false,
+      error: 'Nome da sessão não fornecido.',
+    });
+  }
+
+  console.log(`🔄 Verificando o status da sessão: "${nome}"...`);
+
+  // Verifica se já existe uma sessão em andamento
+  return createNewInstance(nome, res);
+};
+
+module.exports = handleQrcode;
