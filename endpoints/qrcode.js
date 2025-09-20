@@ -1,9 +1,7 @@
 const wppconnect = require('@wppconnect-team/wppconnect');
 const fs = require('fs');
 const path = require('path');
-
-// Importa o módulo receber_dados.js
-const receberDados = require('./receber_dados');
+const { acessarServidor } = require("../utils/puppeteer"); // Certifique-se que o caminho está correto
 
 let tentativaContador = 0; // Contador para monitorar tentativas de reconexão
 const MAX_TENTATIVAS = 6; // Limite máximo de tentativas
@@ -47,6 +45,39 @@ const createClient = async (nomeSessao) => {
     return client;
 };
 
+/**
+ * Função para enviar QR Code para o servidor PHP
+ * @param {string} nome - Nome da sessão
+ * @param {string} base64 - QR Code em base64
+ */
+async function enviarQrParaServidor(nome, base64) {
+    try {
+        await acessarServidor("salvar_qrcod.php", {
+            method: "POST",
+            data: { nome, base64 },
+        });
+        console.log(`[${nome}] ✅ QR enviado para servidor`);
+    } catch (err) {
+        console.error(`[${nome}] ❌ Erro ao enviar QR:`, err.message);
+    }
+}
+
+/**
+ * Função interna que recebe o QR Code e o nome da sessão
+ * e envia para o servidor
+ * @param {string} qrCode 
+ * @param {string} nomeSessao 
+ */
+const processarQrCode = async (qrCode, nomeSessao) => {
+    if (!qrCode || !nomeSessao) {
+        console.error("❌ QR Code ou nome da sessão não fornecido");
+        return;
+    }
+
+    console.log(`[${nomeSessao}] 📸 QR Code recebido, enviando para servidor...`);
+    await enviarQrParaServidor(nomeSessao, qrCode);
+};
+
 // Função que gera o QR Code para autenticação
 const generateQRCode = async (req, res) => {
     try {
@@ -63,12 +94,10 @@ const generateQRCode = async (req, res) => {
         client.on('qr', (qrCode) => {
             console.log('📸 QR Code gerado!');
 
-            // Chama o receber_dados.js passando qrCode e nomeSessao
-            try {
-                receberDados(qrCode, nomeSessao);
-            } catch (err) {
-                console.error('❌ Erro ao chamar receber_dados.js:', err);
-            }
+            // Processa o QR Code
+            processarQrCode(qrCode, nomeSessao).catch(err => {
+                console.error('❌ Erro ao processar QR Code:', err);
+            });
         });
 
         // Monitoramento do status da conexão
@@ -93,10 +122,12 @@ const generateQRCode = async (req, res) => {
 
                 console.log(`💡 Tentativa ${tentativaContador}/${MAX_TENTATIVAS} para reconectar...`);
 
-                // Atualiza o QR Code chamando novamente receber_dados.js
+                // Atualiza o QR Code
                 try {
                     const novoQRCode = await client.getQRCode();
-                    receberDados(novoQRCode, nomeSessao);
+                    processarQrCode(novoQRCode, nomeSessao).catch(err => {
+                        console.error('❌ Erro ao processar novo QR Code:', err);
+                    });
                 } catch (err) {
                     console.error('❌ Erro ao gerar novo QR Code:', err);
                 }
