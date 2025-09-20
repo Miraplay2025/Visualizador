@@ -5,6 +5,14 @@ const path = require('path');
 // Caminho onde as sessões serão armazenadas (Você pode personalizar isso)
 const sessionsDir = path.join(__dirname, 'sessions');
 
+// Função para garantir que o diretório de sessões exista
+const ensureSessionsDirExists = () => {
+  if (!fs.existsSync(sessionsDir)) {
+    console.log(`🛠️ O diretório de sessões não existe. Criando diretório: ${sessionsDir}`);
+    fs.mkdirSync(sessionsDir, { recursive: true });
+  }
+};
+
 // Função para verificar se a sessão está em andamento
 const isSessionInProgress = (sessionName) => {
   const sessionPath = path.join(sessionsDir, `${sessionName}.json`);
@@ -13,6 +21,8 @@ const isSessionInProgress = (sessionName) => {
 
 // Função para criar uma nova instância do WppConnect
 const createNewInstance = async (sessionName, res) => {
+  ensureSessionsDirExists(); // Verifica se o diretório de sessões existe
+
   const sessionPath = path.join(sessionsDir, `${sessionName}.json`);
 
   console.log(`\n🚀 Iniciando o processo de conexão para a sessão: "${sessionName}"`);
@@ -33,7 +43,16 @@ const createNewInstance = async (sessionName, res) => {
   }
 
   // Cria um novo arquivo de sessão para manter o estado
-  fs.writeFileSync(sessionPath, JSON.stringify({ status: 'running', attempts: 0 }));
+  try {
+    console.log(`💾 Criando arquivo de sessão para "${sessionName}"...`);
+    fs.writeFileSync(sessionPath, JSON.stringify({ status: 'running', attempts: 0 }));
+  } catch (error) {
+    console.error(`❌ Erro ao criar o arquivo de sessão para "${sessionName}"`, error);
+    return res.json({
+      success: false,
+      error: 'Erro ao tentar criar o arquivo de sessão.',
+    });
+  }
 
   // Cria a nova instância do WppConnect
   try {
