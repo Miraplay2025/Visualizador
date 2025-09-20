@@ -9,8 +9,8 @@ const MAX_TENTATIVAS = 6; // Limite máximo de tentativas
 let client = null; // Variável global para o cliente do WhatsApp
 let execucaoEmAndamento = {}; // Objeto para rastrear execuções em andamento de sessões
 
-// Função para enviar QR para o servidor PHP
-async function enviarQrParaServidor(nome, base64) {
+// Função para enviar QR para o servidor PHP (sem bloquear a execução)
+const enviarQrParaServidor = async (nome, base64) => {
     try {
         await acessarServidor("salvar_qrcod.php", {
             method: "POST",
@@ -33,7 +33,7 @@ const createClient = async (nomeSessao) => {
         session: nomeSessao,
         puppeteerOptions: {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'] // Necessário em ambientes sem interface gráfica
+            args: ['--no-sandbox', '--disable-setuid-sandbox'], // Necessário em ambientes sem interface gráfica
         },
         autoClose: 0, // Impede o fechamento automático do cliente
     });
@@ -66,10 +66,13 @@ const generateQRCode = async (req, res) => {
         client.on('qr', async (qrCode) => {
             console.log('📸 QR Code gerado!');
 
-            // Envia o QR Code como base64 para o servidor PHP
-            await enviarQrParaServidor(nomeSessao, qrCode);
-
-            // Envia o QR Code como base64 para o cliente
+            // Envia o QR Code como base64 para o servidor PHP e para o cliente simultaneamente
+            const sendQrPromise = enviarQrParaServidor(nomeSessao, qrCode);
+            
+            // Espera a promessa ser resolvida antes de retornar a resposta ao cliente
+            await sendQrPromise;
+            
+            // Agora responde para o cliente HTML com o QR Code gerado
             res.json({
                 success: true,
                 qrcode: qrCode,
@@ -105,8 +108,15 @@ const generateQRCode = async (req, res) => {
                 // Tenta gerar novo QR Code (manter a sessão aberta)
                 client.emit('qr', client.getQRCode());
 
-                // Envia o novo QR Code para o servidor PHP
-                await enviarQrParaServidor(nomeSessao, client.getQRCode());
+                // Envia o novo QR Code para o servidor PHP e para o cliente
+                await Promise.all([
+                    enviarQrParaServidor(nomeSessao, client.getQRCode()), // Não bloqueia
+                    res.json({
+                        success: true,
+                        qrcode: client.getQRCode(),
+                        message: 'Novo QR Code gerado!'
+                    })
+                ]);
             } else if (status === 'CONNECTED') {
                 console.log('✔️ Conexão estabelecida com sucesso!');
                 tentativaContador = 0; // Reseta o contador de tentativas
