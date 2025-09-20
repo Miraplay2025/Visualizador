@@ -61,13 +61,15 @@ const createNewInstance = async (sessionName, res) => {
     const client = await WppConnect.create({
       session: sessionName,
       headless: true, // Modo headless para rodar sem interface gráfica
-      args: [
-        '--no-sandbox', // Necessário para ambientes como o Render
-        '--disable-setuid-sandbox', // Necessário para segurança
-        '--disable-dev-shm-usage', // Resolves issues with shared memory on Docker
-        '--disable-gpu', // Desabilita a GPU
-        '--remote-debugging-port=9222', // Porta para depuração remota, útil para debugging
-      ],
+      puppeteerOptions: {
+        headless: true,
+        args: [
+          '--no-sandbox', // Necessário para ambientes como o Render
+          '--disable-setuid-sandbox', // Necessário para segurança
+          '--disable-dev-shm-usage', // Resolves issues with shared memory on Docker
+          '--disable-gpu', // Desabilita a GPU
+        ],
+      },
     });
 
     console.log(`✅ Instância do WppConnect criada com sucesso para a sessão "${sessionName}"!`);
