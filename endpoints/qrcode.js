@@ -1,97 +1,112 @@
-const wppconnect = require('@wppconnect-team/wppconnect'); // Biblioteca para conexão com WhatsApp
+const wppconnect = require('@wppconnect-team/wppconnect');
 const fs = require('fs');
 const path = require('path');
 
-// Caminho onde as sessões serão armazenadas
-const sessionsDir = path.join(__dirname, 'sessions');
+let tentativaContador = 0; // Contador para monitorar tentativas de reconexão
+const MAX_TENTATIVAS = 6; // Limite máximo de tentativas
 
-// Garante que a pasta de sessões existe
-const ensureSessionsDirExists = () => {
-  if (!fs.existsSync(sessionsDir)) {
-    console.log(`🛠️ O diretório de sessões não existe. Criando diretório: ${sessionsDir}`);
-    fs.mkdirSync(sessionsDir, { recursive: true });
-  }
+let client = null; // Variável global para o cliente do WhatsApp
+
+// Função que envia a mensagem via WhatsApp
+const sendMessage = async (nomeSessao, numero, mensagem) => {
+    try {
+        // Verifica se o cliente já está criado
+        if (!client) {
+            console.error('Cliente não está criado.');
+            return;
+        }
+
+        console.log('🌐 Enviando mensagem via WhatsApp...');
+
+        // Envia a mensagem
+        await client.sendText(numero, mensagem);
+        console.log(`✔️ Mensagem enviada para ${numero}: "${mensagem}"`);
+
+    } catch (error) {
+        console.error('❌ Erro ao enviar mensagem:', error);
+    }
 };
 
-// Verifica se a sessão está em andamento
-const isSessionInProgress = (sessionName) => {
-  const sessionPath = path.join(sessionsDir, `${sessionName}.json`);
-  return fs.existsSync(sessionPath) && require(sessionPath).status === 'running';
+// Função que cria o cliente WPPConnect
+const createClient = async (nomeSessao) => {
+    if (client) {
+        console.log('🔄 Reutilizando cliente existente...');
+        return client;
+    }
+
+    console.log(`🔧 Criando cliente para a sessão: ${nomeSessao}`);
+    client = await wppconnect.create({
+        session: nomeSessao,
+        puppeteerOptions: {
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'] // Necessário em ambientes sem interface gráfica
+        }
+    });
+
+    return client;
 };
 
-// Cria nova instância
-const createNewInstance = async (sessionName, res) => {
-  ensureSessionsDirExists();
-  const sessionPath = path.join(sessionsDir, `${sessionName}.json`);
+// Função que gera o QR Code para autenticação
+const generateQRCode = async (req, res) => {
+    try {
+        const nomeSessao = req.params.nome;
 
-  console.log(`\n🚀 Iniciando o processo de conexão para a sessão: "${sessionName}"`);
+        if (!nomeSessao) {
+            return res.status(400).json({ success: false, error: 'Nome da sessão não fornecido' });
+        }
 
-  if (isSessionInProgress(sessionName)) {
-    console.log(`❌ A sessão "${sessionName}" já está em andamento.`);
-    return res.json({ success: false, error: `A sessão "${sessionName}" já está em andamento.` });
-  }
+        // Cria ou reutiliza o cliente do WhatsApp
+        client = await createClient(nomeSessao);
 
-  if (fs.existsSync(sessionPath)) {
-    console.log(`🧹 Sessão anterior encontrada. Excluindo "${sessionName}"...`);
-    fs.unlinkSync(sessionPath);
-  }
+        // Evento para gerar e enviar QR Code
+        client.on('qr', (qrCode) => {
+            // Retorna o QR Code como base64
+            console.log('📸 QR Code gerado!');
 
-  try {
-    console.log(`💾 Criando arquivo de sessão para "${sessionName}"...`);
-    fs.writeFileSync(sessionPath, JSON.stringify({ status: 'running', attempts: 0 }));
-  } catch (error) {
-    console.error(`❌ Erro ao criar o arquivo de sessão`, error);
-    return res.json({ success: false, error: 'Erro ao tentar criar o arquivo de sessão.' });
-  }
+            // Envia o QR Code como base64 para o cliente
+            res.json({
+                success: true,
+                qrcode: qrCode,
+                message: 'QR Code gerado com sucesso!',
+            });
+        });
 
-  try {
-    console.log(`💻 Criando nova instância do WppConnect para a sessão "${sessionName}"...`);
+        // Monitoramento do status da conexão
+        client.on('status', (status) => {
+            console.log(`🔄 Status da sessão: ${status}`);
 
-    const client = await wppconnect.create({
-      session: sessionName,
-      puppeteerOptions: {
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-      },
-    });
+            // Verifica se o QR Code expirou ou se houve perda de conexão
+            if (status === 'QRCODE' || status === 'CONNECTION_LOST') {
+                console.log('⚠️ QR Code expirado ou conexão perdida.');
 
-    console.log(`✅ Instância criada com sucesso para "${sessionName}"!`);
+                tentativaContador++;
 
-    // Evento QR Code
-    client.on('qr', (qrCode) => {
-      console.log(`🔑 QR Code gerado para "${sessionName}"`);
-      return res.json({
-        success: true,
-        message: 'QR Code gerado com sucesso.',
-        qrCode: `data:image/png;base64,${qrCode}`,
-      });
-    });
+                if (tentativaContador >= MAX_TENTATIVAS) {
+                    console.log('❌ Número máximo de tentativas alcançado. Excluindo sessão...');
+                    client.close(); // Fecha a sessão
+                    fs.unlinkSync(path.join(__dirname, `${nomeSessao}.json`)); // Exclui o arquivo da sessão (se houver)
+                    return res.status(500).json({ success: false, error: 'Erro ao conectar após várias tentativas. Sessão excluída.' });
+                }
 
-    // Evento autenticado
-    client.on('authenticated', () => {
-      console.log(`✅ QR Code escaneado com sucesso para "${sessionName}"!`);
-      const sessionData = require(sessionPath);
-      sessionData.status = 'authenticated';
-      fs.writeFileSync(sessionPath, JSON.stringify(sessionData));
+                console.log(`💡 Tentativa ${tentativaContador}/${MAX_TENTATIVAS} para reconectar...`);
 
-      return res.json({ success: true, message: 'Sessão conectada com sucesso!' });
-    });
+                // Tenta gerar novo QR Code
+                client.emit('qr', client.getQRCode());
+            } else if (status === 'CONNECTED') {
+                console.log('✔️ Conexão estabelecida com sucesso!');
+                tentativaContador = 0; // Reseta o contador de tentativas
 
-    // Evento desconectado
-    client.on('disconnected', (reason) => {
-      console.log(`⚠️ Sessão "${sessionName}" desconectada. Motivo: ${reason}`);
-      if (fs.existsSync(sessionPath)) fs.unlinkSync(sessionPath);
-    });
+                // Envia a mensagem assim que a conexão for bem-sucedida
+                const numero = '1234567890@c.us'; // Número de WhatsApp do destinatário, no formato E.164
+                const mensagem = 'Olá! Esta é uma mensagem enviada via WPPConnect.';
+                sendMessage(nomeSessao, numero, mensagem);
+            }
+        });
 
-    // Sessão pronta
-    client.on('ready', () => {
-      console.log(`📱 Sessão "${sessionName}" está pronta para uso.`);
-    });
-
-  } catch (error) {
-    console.error(`❌ Erro ao criar a instância`, error);
-    return res.json({ success: false, error: 'Erro ao tentar criar a instância do WppConnect.' });
-  }
+    } catch (error) {
+        console.error('❌ Erro ao conectar ao WhatsApp:', error);
+        res.status(500).json({ success: false, error: 'Erro ao conectar ao WhatsApp' });
+    }
 };
 
-module.exports = { createNewInstance };
+module.exports = generateQRCode;
