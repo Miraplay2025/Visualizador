@@ -37,11 +37,11 @@ const createClient = async (nomeSessao) => {
     console.log(`🔧 Criando cliente para a sessão: ${nomeSessao}`);
     client = await wppconnect.create({
         session: nomeSessao,
-        autoClose: false, // Evita que o cliente feche automaticamente
         puppeteerOptions: {
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox'] // Necessário em ambientes sem interface gráfica
-        }
+        },
+        autoClose: 0, // Impede o fechamento automático do cliente
     });
 
     return client;
@@ -73,7 +73,7 @@ const generateQRCode = async (req, res) => {
         });
 
         // Monitoramento do status da conexão
-        client.on('status', (status) => {
+        client.on('status', async (status) => {
             console.log(`🔄 Status da sessão: ${status}`);
 
             // Verifica se o QR Code expirou ou se houve perda de conexão
@@ -84,8 +84,12 @@ const generateQRCode = async (req, res) => {
 
                 if (tentativaContador >= MAX_TENTATIVAS) {
                     console.log('❌ Número máximo de tentativas alcançado. Excluindo sessão...');
-                    client.close(); // Fecha a sessão
-                    fs.unlinkSync(path.join(__dirname, `${nomeSessao}.json`)); // Exclui o arquivo da sessão (se houver)
+                    try {
+                        client.close(); // Fecha a sessão
+                        fs.unlinkSync(path.join(__dirname, `${nomeSessao}.json`)); // Exclui o arquivo da sessão (se houver)
+                    } catch (err) {
+                        console.error('❌ Erro ao excluir sessão:', err);
+                    }
                     return res.status(500).json({ success: false, error: 'Erro ao conectar após várias tentativas. Sessão excluída.' });
                 }
 
