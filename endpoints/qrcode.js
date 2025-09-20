@@ -1,4 +1,4 @@
-const WppConnect = require('@wppconnect-team/wppconnect'); // biblioteca para conexão com WhatsApp
+const WppConnect = require('@wppconnect-team/wppconnect'); // Biblioteca para conexão com WhatsApp
 const fs = require('fs');
 const path = require('path');
 
@@ -66,7 +66,7 @@ const createNewInstance = async (sessionName, res) => {
         args: [
           '--no-sandbox', // Necessário para ambientes como o Render
           '--disable-setuid-sandbox', // Necessário para segurança
-          '--disable-dev-shm-usage', // Resolves issues with shared memory on Docker
+          '--disable-dev-shm-usage', // Resolve problemas com memória compartilhada no Docker
           '--disable-gpu', // Desabilita a GPU
         ],
       },
@@ -166,3 +166,4 @@ const handleQrcode = async (req, res) => {
 };
 
 module.exports = handleQrcode;
+
