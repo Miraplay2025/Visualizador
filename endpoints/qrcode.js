@@ -152,3 +152,4 @@ const handleQrcode = async (req, res) => {
 };
 
 module.exports = handleQrcode;
+      
