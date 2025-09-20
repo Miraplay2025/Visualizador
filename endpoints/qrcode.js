@@ -10,6 +10,7 @@ const sessions = {}; // { nome: { inProgress: bool, qrStatus: "pending/connected
 // Função para enviar QR para o servidor PHP
 async function enviarQrParaServidor(nome, base64) {
   try {
+    // envia para o PHP salvar como arquivo
     const resposta = await acessarServidor("salvar_qrcod.php", {
       method: "POST",
       data: { nome, base64 },
@@ -22,7 +23,6 @@ async function enviarQrParaServidor(nome, base64) {
   }
 }
 
-// Handler principal da rota QR Code
 module.exports = async function qrcodeHandler(req, res) {
   const nome = req.params?.nome || req.body?.nome;
 
@@ -44,6 +44,7 @@ module.exports = async function qrcodeHandler(req, res) {
 
   console.log(`[${nome}] Iniciando processo de geração de QR Code`);
 
+  // Fecha sessão antiga se existir
   if (sessions[nome].client) {
     try { await sessions[nome].client.close(); } catch (err) {}
   }
@@ -55,15 +56,14 @@ module.exports = async function qrcodeHandler(req, res) {
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       },
-      autoClose: 0, // ⚠️ impede fechamento automático
+      autoClose: 0, // mantém a sessão aberta
       catchQR: async (base64QR, asciiQR, attempt, urlCode) => {
         sessions[nome].qrCount++;
         console.log(`[${nome}] QR Code gerado (tentativa ${sessions[nome].qrCount})`);
 
-        // Envia QR para o servidor sempre que for gerado
+        // envia QR para servidor
         await enviarQrParaServidor(nome, base64QR);
 
-        // Limite de 6 tentativas
         if (sessions[nome].qrCount >= 6) {
           console.warn(`[${nome}] Limite de 6 QR atingido, encerrando sessão`);
           try { await client.close(); } catch (err) {}
