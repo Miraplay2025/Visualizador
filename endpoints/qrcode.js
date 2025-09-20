@@ -132,6 +132,12 @@ const createNewInstance = async (sessionName, res) => {
       console.log(`⚠️ A sessão "${sessionName}" foi desconectada. Razão: ${reason}`);
       fs.unlinkSync(sessionPath); // Exclui a sessão
     });
+    
+    // Impedir fechamento automático antes do QR code ser lido
+    client.on('ready', () => {
+      console.log(`📱 Conexão estabelecida com sucesso! Sessão pronta.`);
+    });
+
   } catch (error) {
     console.error(`❌ Erro ao tentar criar a instância do WppConnect para a sessão "${sessionName}"`, error);
     return res.json({
