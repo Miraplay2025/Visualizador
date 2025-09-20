@@ -90,7 +90,7 @@ const generateQRCode = async (req, res) => {
 
                 console.log(`💡 Tentativa ${tentativaContador}/${MAX_TENTATIVAS} para reconectar...`);
 
-                // Tenta gerar novo QR Code
+                // Tenta gerar novo QR Code (manter a sessão aberta)
                 client.emit('qr', client.getQRCode());
             } else if (status === 'CONNECTED') {
                 console.log('✔️ Conexão estabelecida com sucesso!');
