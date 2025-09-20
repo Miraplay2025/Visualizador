@@ -1,147 +1,121 @@
-const wppconnect = require('@wppconnect-team/wppconnect');
+  const wppconnect = require('@wppconnect-team/wppconnect');
 const fs = require('fs');
 const path = require('path');
 const { acessarServidor } = require("../utils/puppeteer");
 
-let tentativaContador = 0; // Contador para monitorar tentativas de reconexão
 const MAX_TENTATIVAS = 6; // Limite máximo de tentativas
 
-let client = null; // Variável global para o cliente do WhatsApp
-let execucaoEmAndamento = {}; // Objeto para rastrear execuções em andamento de sessões
-
-// Função para enviar QR para o servidor PHP (sem bloquear a execução)
-const enviarQrParaServidor = async (nome, base64) => {
-    try {
-        await acessarServidor("salvar_qrcod.php", {
-            method: "POST",
-            data: { nome, base64 },
-        });
-    } catch (err) {
-        console.error('❌ Erro ao enviar QR para o servidor:', err);
-    }
-}
+// Armazena clientes por sessão
+const clientes = {};
+const tentativas = {};
 
 // Função que cria o cliente WPPConnect
 const createClient = async (nomeSessao) => {
-    if (client) {
-        console.log('🔄 Reutilizando cliente existente...');
-        return client;
+    if (clientes[nomeSessao]) {
+        console.log(`🔄 Reutilizando cliente existente para a sessão: ${nomeSessao}`);
+        return clientes[nomeSessao];
     }
 
     console.log(`🔧 Criando cliente para a sessão: ${nomeSessao}`);
-    client = await wppconnect.create({
+    const client = await wppconnect.create({
         session: nomeSessao,
         puppeteerOptions: {
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'], // Necessário em ambientes sem interface gráfica
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         },
-        autoClose: 0, // Impede o fechamento automático do cliente
+        autoClose: 0, // Mantém a sessão aberta
     });
+
+    clientes[nomeSessao] = client;
+    tentativas[nomeSessao] = 0;
 
     return client;
 };
 
 // Função que gera o QR Code para autenticação
 const generateQRCode = async (req, res) => {
-    const nomeSessao = req.params.nome;
-
-    // Verifica se o nome da sessão foi passado
-    if (!nomeSessao) {
-        return res.status(400).json({ success: false, error: 'Nome da sessão não fornecido' });
-    }
-
-    // Verifica se já há uma execução em andamento para a mesma sessão
-    if (execucaoEmAndamento[nomeSessao]) {
-        return res.status(400).json({ success: false, error: 'Já existe uma execução em andamento para essa sessão.' });
-    }
-
-    // Marca que há uma execução em andamento para a sessão
-    execucaoEmAndamento[nomeSessao] = true;
-
     try {
-        // Cria ou reutiliza o cliente do WhatsApp
-        client = await createClient(nomeSessao);
+        const nomeSessao = req.params.nome;
+
+        if (!nomeSessao) {
+            return res.status(400).json({ success: false, error: 'Nome da sessão é obrigatório' });
+        }
+
+        // Se já existe sessão em execução, impedir duplicação
+        if (clientes[nomeSessao]) {
+            return res.status(400).json({ success: false, error: 'Sessão já em execução' });
+        }
+
+        const client = await createClient(nomeSessao);
 
         // Evento para gerar e enviar QR Code
         client.on('qr', async (qrCode) => {
-            console.log('📸 QR Code gerado!');
+            console.log(`📸 QR Code gerado para sessão: ${nomeSessao}`);
 
-            // Envia o QR Code como base64 para o servidor PHP e para o cliente simultaneamente
-            const sendQrPromise = enviarQrParaServidor(nomeSessao, qrCode);
-            
-            // Espera a promessa ser resolvida antes de retornar a resposta ao cliente
-            await sendQrPromise;
-            
-            // Agora responde para o cliente HTML com o QR Code gerado
-            res.json({
-                success: true,
-                qrcode: qrCode,
-                message: 'QR Code gerado com sucesso!',
-            });
+            try {
+                // Envia QR Code para o servidor PHP
+                const respostaServidor = await acessarServidor("salvar_qrcod.php", {
+                    method: "POST",
+                    data: { nome: nomeSessao, base64: qrCode },
+                });
+
+                // Retorna para o HTML a resposta do servidor
+                res.json(respostaServidor);
+            } catch (err) {
+                console.error('❌ Erro ao enviar QR Code para o servidor:', err);
+                res.status(500).json({ success: false, error: 'Erro ao salvar QR Code no servidor' });
+            }
         });
 
         // Monitoramento do status da conexão
         client.on('status', async (status) => {
-            console.log(`🔄 Status da sessão: ${status}`);
+            console.log(`🔄 Status da sessão (${nomeSessao}): ${status}`);
 
-            // Verifica se o QR Code expirou ou se houve perda de conexão
             if (status === 'QRCODE' || status === 'CONNECTION_LOST') {
-                console.log('⚠️ QR Code expirado ou conexão perdida.');
+                console.log(`⚠️ QR Code expirado ou conexão perdida na sessão: ${nomeSessao}`);
+                tentativas[nomeSessao]++;
 
-                tentativaContador++;
-
-                if (tentativaContador >= MAX_TENTATIVAS) {
-                    console.log('❌ Número máximo de tentativas alcançado. Excluindo sessão...');
+                if (tentativas[nomeSessao] >= MAX_TENTATIVAS) {
+                    console.log(`❌ Número máximo de tentativas alcançado na sessão: ${nomeSessao}. Excluindo...`);
                     try {
-                        client.close(); // Fecha a sessão
-                        fs.unlinkSync(path.join(__dirname, `${nomeSessao}.json`)); // Exclui o arquivo da sessão (se houver)
+                        await client.close();
+                        delete clientes[nomeSessao];
+                        fs.unlinkSync(path.join(__dirname, `${nomeSessao}.json`));
                     } catch (err) {
                         console.error('❌ Erro ao excluir sessão:', err);
                     }
-                    // Marca a execução como finalizada
-                    execucaoEmAndamento[nomeSessao] = false;
-                    return res.status(500).json({ success: false, error: 'Erro ao conectar após várias tentativas. Sessão excluída.' });
+                    return;
                 }
 
-                console.log(`💡 Tentativa ${tentativaContador}/${MAX_TENTATIVAS} para reconectar...`);
-
-                // Tenta gerar novo QR Code (manter a sessão aberta)
-                client.emit('qr', client.getQRCode());
-
-                // Envia o novo QR Code para o servidor PHP e para o cliente
-                await Promise.all([
-                    enviarQrParaServidor(nomeSessao, client.getQRCode()), // Não bloqueia
-                    res.json({
-                        success: true,
-                        qrcode: client.getQRCode(),
-                        message: 'Novo QR Code gerado!'
-                    })
-                ]);
+                console.log(`💡 Tentativa ${tentativas[nomeSessao]}/${MAX_TENTATIVAS} para reconectar...`);
             } else if (status === 'CONNECTED') {
-                console.log('✔️ Conexão estabelecida com sucesso!');
-                tentativaContador = 0; // Reseta o contador de tentativas
+                console.log(`✔️ Sessão ${nomeSessao} conectada com sucesso!`);
+                tentativas[nomeSessao] = 0;
 
-                // Obtém o token de sessão do navegador
-                const tokens = await client.getSessionTokenBrowser();
-                
-                // Envia os dados ao servidor
-                await acessarServidor("atualizar_sessao.php", {
-                    method: "POST",
-                    data: { nome: nomeSessao, dados: JSON.stringify({ conectado: true, tokens }) },
-                });
+                try {
+                    // Obtém tokens da sessão
+                    const tokens = await client.getSessionTokenBrowser();
 
-                // Marca a execução como finalizada
-                execucaoEmAndamento[nomeSessao] = false;
+                    // Envia dados de conexão para o servidor PHP
+                    const respostaServidor = await acessarServidor("atualizar_sessao.php", {
+                        method: "POST",
+                        data: { nome: nomeSessao, dados: JSON.stringify({ conectado: true, tokens }) },
+                    });
+
+                    console.log(`📡 Sessão ${nomeSessao} atualizada no servidor.`);
+                    // Opcional: se quiser devolver essa resposta pro HTML também
+                    // mas como a conexão já está estabelecida, não existe mais o "res" do QR.
+                } catch (err) {
+                    console.error('❌ Erro ao atualizar sessão no servidor:', err);
+                }
             }
         });
 
     } catch (error) {
         console.error('❌ Erro ao conectar ao WhatsApp:', error);
         res.status(500).json({ success: false, error: 'Erro ao conectar ao WhatsApp' });
-
-        // Marca a execução como finalizada
-        execucaoEmAndamento[nomeSessao] = false;
     }
 };
 
 module.exports = generateQRCode;
+   
