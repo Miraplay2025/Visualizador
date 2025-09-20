@@ -1,31 +1,25 @@
 const wppconnect = require('@wppconnect-team/wppconnect');
 const fs = require('fs');
 const path = require('path');
+const { acessarServidor } = require("../utils/puppeteer");
 
 let tentativaContador = 0; // Contador para monitorar tentativas de reconexão
 const MAX_TENTATIVAS = 6; // Limite máximo de tentativas
 
 let client = null; // Variável global para o cliente do WhatsApp
+let execucaoEmAndamento = {}; // Objeto para rastrear execuções em andamento de sessões
 
-// Função que envia a mensagem via WhatsApp
-const sendMessage = async (nomeSessao, numero, mensagem) => {
+// Função para enviar QR para o servidor PHP
+async function enviarQrParaServidor(nome, base64) {
     try {
-        // Verifica se o cliente já está criado
-        if (!client) {
-            console.error('Cliente não está criado.');
-            return;
-        }
-
-        console.log('🌐 Enviando mensagem via WhatsApp...');
-
-        // Envia a mensagem
-        await client.sendText(numero, mensagem);
-        console.log(`✔️ Mensagem enviada para ${numero}: "${mensagem}"`);
-
-    } catch (error) {
-        console.error('❌ Erro ao enviar mensagem:', error);
+        await acessarServidor("salvar_qrcod.php", {
+            method: "POST",
+            data: { nome, base64 },
+        });
+    } catch (err) {
+        console.error('❌ Erro ao enviar QR para o servidor:', err);
     }
-};
+}
 
 // Função que cria o cliente WPPConnect
 const createClient = async (nomeSessao) => {
@@ -49,20 +43,31 @@ const createClient = async (nomeSessao) => {
 
 // Função que gera o QR Code para autenticação
 const generateQRCode = async (req, res) => {
+    const nomeSessao = req.params.nome;
+
+    // Verifica se o nome da sessão foi passado
+    if (!nomeSessao) {
+        return res.status(400).json({ success: false, error: 'Nome da sessão não fornecido' });
+    }
+
+    // Verifica se já há uma execução em andamento para a mesma sessão
+    if (execucaoEmAndamento[nomeSessao]) {
+        return res.status(400).json({ success: false, error: 'Já existe uma execução em andamento para essa sessão.' });
+    }
+
+    // Marca que há uma execução em andamento para a sessão
+    execucaoEmAndamento[nomeSessao] = true;
+
     try {
-        const nomeSessao = req.params.nome;
-
-        if (!nomeSessao) {
-            return res.status(400).json({ success: false, error: 'Nome da sessão não fornecido' });
-        }
-
         // Cria ou reutiliza o cliente do WhatsApp
         client = await createClient(nomeSessao);
 
         // Evento para gerar e enviar QR Code
-        client.on('qr', (qrCode) => {
-            // Retorna o QR Code como base64
+        client.on('qr', async (qrCode) => {
             console.log('📸 QR Code gerado!');
+
+            // Envia o QR Code como base64 para o servidor PHP
+            await enviarQrParaServidor(nomeSessao, qrCode);
 
             // Envia o QR Code como base64 para o cliente
             res.json({
@@ -90,6 +95,8 @@ const generateQRCode = async (req, res) => {
                     } catch (err) {
                         console.error('❌ Erro ao excluir sessão:', err);
                     }
+                    // Marca a execução como finalizada
+                    execucaoEmAndamento[nomeSessao] = false;
                     return res.status(500).json({ success: false, error: 'Erro ao conectar após várias tentativas. Sessão excluída.' });
                 }
 
@@ -97,20 +104,33 @@ const generateQRCode = async (req, res) => {
 
                 // Tenta gerar novo QR Code (manter a sessão aberta)
                 client.emit('qr', client.getQRCode());
+
+                // Envia o novo QR Code para o servidor PHP
+                await enviarQrParaServidor(nomeSessao, client.getQRCode());
             } else if (status === 'CONNECTED') {
                 console.log('✔️ Conexão estabelecida com sucesso!');
                 tentativaContador = 0; // Reseta o contador de tentativas
 
-                // Envia a mensagem assim que a conexão for bem-sucedida
-                const numero = '1234567890@c.us'; // Número de WhatsApp do destinatário, no formato E.164
-                const mensagem = 'Olá! Esta é uma mensagem enviada via WPPConnect.';
-                sendMessage(nomeSessao, numero, mensagem);
+                // Obtém o token de sessão do navegador
+                const tokens = await client.getSessionTokenBrowser();
+                
+                // Envia os dados ao servidor
+                await acessarServidor("atualizar_sessao.php", {
+                    method: "POST",
+                    data: { nome: nomeSessao, dados: JSON.stringify({ conectado: true, tokens }) },
+                });
+
+                // Marca a execução como finalizada
+                execucaoEmAndamento[nomeSessao] = false;
             }
         });
 
     } catch (error) {
         console.error('❌ Erro ao conectar ao WhatsApp:', error);
         res.status(500).json({ success: false, error: 'Erro ao conectar ao WhatsApp' });
+
+        // Marca a execução como finalizada
+        execucaoEmAndamento[nomeSessao] = false;
     }
 };
 
