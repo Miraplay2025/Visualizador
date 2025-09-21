@@ -2,7 +2,7 @@ FROM node:18-slim
 
 WORKDIR /app
 
-# Instala dependências básicas
+# Dependências básicas
 RUN apt-get update && apt-get install -y \
   wget \
   ca-certificates \
@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y \
 # Copia package.json e package-lock.json
 COPY package*.json ./
 
-# Instala dependências do projeto
+# Instala dependências
 RUN npm install --production
 
 # Copia todo o projeto
