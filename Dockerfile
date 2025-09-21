@@ -1,23 +1,21 @@
-FROM node:18-slim
+# Imagem base Node.js
+FROM node:20-slim
 
+# Diretório da aplicação
 WORKDIR /app
 
-# Dependências básicas
-RUN apt-get update && apt-get install -y \
-  wget \
-  ca-certificates \
-  --no-install-recommends && \
-  rm -rf /var/lib/apt/lists/*
-
-# Copia package.json e package-lock.json
-COPY package*.json ./
-
-# Instala dependências
+# Copia package.json e instala dependências
+COPY package.json ./
 RUN npm install --production
 
-# Copia todo o projeto
+# Copia todo o código
 COPY . .
 
+# Cria pasta para salvar sessões
+RUN mkdir -p /app/sessions
+
+# Porta
 EXPOSE 3000
 
+# Comando para iniciar o servidor
 CMD ["npm", "start"]
