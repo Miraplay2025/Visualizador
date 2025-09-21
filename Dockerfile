@@ -1,8 +1,9 @@
-FROM node:20-slim
+# Base Node.js 18 slim
+FROM node:18-slim
 
 WORKDIR /app
 
-# Instalar dependências necessárias do Chromium
+# Instalar dependências do Chromium necessárias para Puppeteer
 RUN apt-get update && apt-get install -y \
   wget \
   ca-certificates \
@@ -43,16 +44,20 @@ RUN apt-get update && apt-get install -y \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
 
-# Copia package.json e package-lock.json
+# Copia package.json e package-lock.json para aproveitar cache
 COPY package*.json ./
 
-# Instalar dependências + Chromium via Puppeteer
-RUN npm install --production && \
-    npx puppeteer@latest install chrome
+# Instala dependências de produção
+RUN npm install --omit=dev
+
+# Instala Chromium do Puppeteer
+RUN npx puppeteer install chrome
 
 # Copia todo o projeto
 COPY . .
 
+# Expõe porta padrão do servidor Node.js
 EXPOSE 3000
 
+# Comando de inicialização
 CMD ["npm", "start"]
