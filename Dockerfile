@@ -46,8 +46,9 @@ RUN apt-get update && apt-get install -y \
 # Copia package.json e package-lock.json
 COPY package*.json ./
 
-# Instalar dependências do projeto
-RUN npm install --production
+# Instalar dependências + Chromium via Puppeteer
+RUN npm install --production && \
+    npx puppeteer@latest install chrome
 
 # Copia todo o projeto
 COPY . .
