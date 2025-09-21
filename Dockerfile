@@ -1,8 +1,10 @@
+# Imagem base oficial Node.js slim (mais leve)
 FROM node:18-slim
 
+# Define o diretório de trabalho dentro do container
 WORKDIR /app
 
-# Instalar dependências necessárias do Chromium
+# Instalar dependências do sistema necessárias para rodar o Chromium
 RUN apt-get update && apt-get install -y \
   wget \
   ca-certificates \
@@ -43,16 +45,18 @@ RUN apt-get update && apt-get install -y \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
 
-# Copia package.json e package-lock.json
+# Copia arquivos de dependências do Node.js
 COPY package*.json ./
 
-# Instalar dependências + Chromium via Puppeteer
+# Instala dependências do Node e o Chromium compatível do Puppeteer
 RUN npm install --production && \
     npx puppeteer@latest install chrome
 
-# Copia todo o projeto
+# Copia o restante do código para dentro do container
 COPY . .
 
+# Expõe a porta da aplicação
 EXPOSE 3000
 
+# Comando padrão para iniciar a aplicação
 CMD ["npm", "start"]
