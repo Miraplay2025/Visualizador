@@ -2,20 +2,19 @@ FROM node:18-slim
 
 WORKDIR /app
 
-# Instala dependências básicas
 RUN apt-get update && apt-get install -y \
   wget \
   ca-certificates \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
 
-# Copia package.json e package-lock.json
+# Atualiza npm
+RUN npm install -g npm@11.6.0
+
 COPY package*.json ./
 
-# Instala dependências
 RUN npm install --production
 
-# Copia todo o projeto
 COPY . .
 
 EXPOSE 3000
